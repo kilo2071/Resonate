@@ -13,3 +13,15 @@
     color: #57e389;
     letter-spacing: 0.04em;
 }
+
+/* Coming Soon overlay on the Effects tab */
+.coming-soon-overlay {
+    background-color: alpha(#000000, 0.62);
+}
+
+.coming-soon-label {
+    font-size: 2.2rem;
+    font-weight: 700;
+    color: alpha(#ffffff, 0.55);
+    letter-spacing: 0.12em;
+}

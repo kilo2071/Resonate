@@ -6,7 +6,6 @@
     <property name="title" translatable="yes">Resonate</property>
     <property name="default-width">1100</property>
     <property name="default-height">700</property>
-    <property name="default-icon-name">io.github.resonate</property>
     <child>
       <object class="AdwToolbarView">
         <child type="top">
@@ -14,7 +13,8 @@
             <child type="end">
               <object class="GtkButton" id="add_sound_button">
                 <property name="icon-name">list-add-symbolic</property>
-                <property name="tooltip-text" translatable="yes">Add Sound</property>
+                <property name="tooltip-text" translatable="yes">Add sound files</property>
+                <property name="action-name">win.add-files</property>
                 <style>
                   <class name="suggested-action"/>
                 </style>

@@ -1,5 +1,6 @@
 mod application;
 mod audio;
+mod config;
 mod plugins;
 mod ui;
 mod window;
@@ -20,12 +21,12 @@ fn main() -> glib::ExitCode {
     .expect("Failed to load gresource bundle");
     gtk::gio::resources_register(&resources);
 
-    // Register app icon from resources
+    gtk::Window::set_default_icon_name("io.github.resonate");
+
     if let Some(display) = gtk::gdk::Display::default() {
         let icon_theme = gtk::IconTheme::for_display(&display);
         icon_theme.add_resource_path("/io/github/resonate/icons");
 
-        // Load app stylesheet
         let provider = gtk::CssProvider::new();
         provider.load_from_resource("/io/github/resonate/style.css");
         gtk::style_context_add_provider_for_display(

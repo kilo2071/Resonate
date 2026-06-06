@@ -1,3 +1,4 @@
+use adw::prelude::*;
 use adw::subclass::prelude::*;
 use gtk::glib;
 
@@ -7,6 +8,10 @@ mod imp {
     #[derive(Default, gtk::CompositeTemplate)]
     #[template(resource = "/io/github/resonate/ui/settings_page.ui")]
     pub struct ResonateSettingsPage {
+        #[template_child]
+        pub sounds_folder_row: TemplateChild<adw::ActionRow>,
+        #[template_child]
+        pub move_files_row: TemplateChild<adw::SwitchRow>,
         #[template_child]
         pub input_device_row: TemplateChild<adw::ComboRow>,
         #[template_child]
@@ -56,6 +61,18 @@ glib::wrapper! {
 impl ResonateSettingsPage {
     pub fn new() -> Self {
         glib::Object::builder().build()
+    }
+
+    pub fn set_sounds_folder_label(&self, path: &str) {
+        self.imp().sounds_folder_row.set_subtitle(path);
+    }
+
+    pub fn move_files_active(&self) -> bool {
+        self.imp().move_files_row.is_active()
+    }
+
+    pub fn set_move_files_active(&self, active: bool) {
+        self.imp().move_files_row.set_active(active);
     }
 }
 

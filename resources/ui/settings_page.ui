@@ -5,6 +5,34 @@
   <template class="ResonateSettingsPage" parent="AdwPreferencesPage">
     <property name="title" translatable="yes">Settings</property>
 
+    <!-- Sounds Library -->
+    <child>
+      <object class="AdwPreferencesGroup">
+        <property name="title" translatable="yes">Sounds Library</property>
+        <property name="description" translatable="yes">Where your sound files are stored</property>
+        <child>
+          <object class="AdwActionRow" id="sounds_folder_row">
+            <property name="title" translatable="yes">Sounds Folder</property>
+            <property name="subtitle" translatable="yes">~/Documents/Sounds</property>
+            <property name="activatable">true</property>
+            <child type="suffix">
+              <object class="GtkImage">
+                <property name="icon-name">folder-symbolic</property>
+                <property name="valign">center</property>
+              </object>
+            </child>
+          </object>
+        </child>
+        <child>
+          <object class="AdwSwitchRow" id="move_files_row">
+            <property name="title" translatable="yes">Move Added Files</property>
+            <property name="subtitle" translatable="yes">Move new sounds into the Sounds Folder when added</property>
+            <property name="active">true</property>
+          </object>
+        </child>
+      </object>
+    </child>
+
     <!-- Audio Input -->
     <child>
       <object class="AdwPreferencesGroup">
