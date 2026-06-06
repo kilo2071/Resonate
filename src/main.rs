@@ -14,6 +14,7 @@ fn main() -> glib::ExitCode {
 
     gtk::init().expect("Failed to initialize GTK");
     adw::init().expect("Failed to initialize libadwaita");
+    glib::set_application_name("Resonate");
 
     let resources = gtk::gio::Resource::load(
         std::path::Path::new(concat!(env!("OUT_DIR"), "/resonate.gresource")),
