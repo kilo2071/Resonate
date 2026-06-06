@@ -6,7 +6,7 @@ mod imp {
     use super::*;
 
     #[derive(Default, gtk::CompositeTemplate)]
-    #[template(resource = "/io/github/resonate/ui/sound_tile.ui")]
+    #[template(resource = "/io/github/kilo2071/Resonate/ui/sound_tile.ui")]
     pub struct ResonateSoundTile {
         #[template_child]
         pub number_label: TemplateChild<gtk::Label>,

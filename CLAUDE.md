@@ -8,7 +8,6 @@ A Libadwaita soundboard application for GNOME with virtual audio output and micr
 - `gtk4-rs` and `libadwaita` crates are mature and actively maintained by the GNOME Rust team
 - `pipewire-rs` provides safe bindings to PipeWire for virtual audio device management
 - Memory safety is critical for real-time audio processing (no use-after-free in audio callbacks)
-- LV2 plugin loading can be done via the `lv2` crate or direct `libloading`
 - GNOME itself ships multiple first-party Rust apps (Loupe, Snapshot, etc.)
 
 ## Target Platform
@@ -18,67 +17,89 @@ A Libadwaita soundboard application for GNOME with virtual audio output and micr
 - **Audio**: PipeWire (default on Fedora)
 - **UI toolkit**: GTK 4 + Libadwaita
 
+## App ID
+
+`io.github.kilo2071.Resonate`
+
+Config stored at: `~/.config/io.github.kilo2071.Resonate/config.json`
+
 ## Features
 
 ### Core
-- Soundboard: load and play audio samples through a PipeWire virtual sink
-- Virtual audio device: create a PipeWire loopback/virtual source so sounds appear as a microphone input
-- Plugin system: apply real-time effects to microphone input (gate, EQ, reverb, etc.)
+- Soundboard: load and play audio samples, monitored through the system audio output
+- Virtual audio device: PipeWire virtual source so sounds and mic appear as one mic input to other apps
+- Plugin system: apply real-time effects to microphone input (built-in Noise Gate, Gain + any installed LV2 plugin)
 
 ### Plugin Architecture
-- Plugins are dynamically loaded shared libraries (`.so`) implementing a common `ResonatePlugin` trait
-- Support for LV2 plugins (standard Linux audio plugin format) via the `lv2` crate
-- Plugin chain: microphone → [plugin 1] → [plugin 2] → virtual output
+- Built-in plugins implement `ResonatePlugin` trait in `src/plugins/builtin/`
+- Installed LV2 plugins are hosted via the `livi` crate (links `lilv`) in `src/plugins/lv2.rs`, wrapped behind the same `ResonatePlugin` trait. A single process-global `Lv2Host` owns the `livi::World` for the program lifetime (lilv instances don't keep the world alive).
+- The chain runs in-process on the PipeWire **mic capture** callback (`src/audio/virtual_device.rs`): physical mic → `PluginChain::process` → Resonate sink. The chain is `Arc<Mutex<PluginChain>>`, shared with the UI thread (`try_lock` in the RT callback).
+- Chain is serialised to `config.json` as `effects_chain: Vec<EffectEntry>`. Built-in entries use ids `gain`/`gate`; LV2 entries use id `lv2:<uri>` with control values keyed by port symbol.
+- The effects page builds parameter sliders generically from `ResonatePlugin::params()`, so LV2 plugins get controls automatically; the "Add effect" sheet lists built-ins + `lv2::discover()`.
 
 ## Key Dependencies
 
 ```toml
 [dependencies]
-gtk = { version = "0.9", package = "gtk4", features = ["v4_14"] }
-adw = { version = "0.7", package = "libadwaita", features = ["v1_6"] }
-pipewire = "0.8"          # pipewire-rs
-libloading = "0.8"        # dynamic plugin loading
+gtk = { version = "0.11", package = "gtk4", features = ["v4_14"] }
+adw = { version = "0.9", package = "libadwaita", features = ["v1_6"] }
+pipewire = "0.10"
+livi = "0.7"          # LV2 host (links system lilv/lv2 dev libs)
+libloading = "0.8"
 serde = { version = "1", features = ["derive"] }
-serde_json = "1"          # config/preset serialization
+serde_json = "1"
 anyhow = "1"
-tokio = { version = "1", features = ["rt", "macros"] }  # async runtime
+log = "0.4"
+env_logger = "0.11"
+rodio = { version = "0.20", default-features = false, features = ["symphonia-all"] }
+
+[build-dependencies]
+glib-build-tools = "0.20"
 ```
+
+No `tokio`, no `ringbuf`.
 
 ## Project Structure
 
 ```
 resonate/
 ├── src/
-│   ├── main.rs               # app entry, GApplication setup
-│   ├── application.rs        # AdwApplication subclass
-│   ├── window.rs             # AdwApplicationWindow subclass
+│   ├── main.rs                     # app entry, GApplication setup
+│   ├── application.rs              # AdwApplication subclass
+│   ├── window.rs                   # AdwApplicationWindow + wiring
+│   ├── config.rs                   # Config, EffectEntry (serde_json)
 │   ├── audio/
 │   │   ├── mod.rs
-│   │   ├── engine.rs         # PipeWire main loop, graph management
-│   │   ├── virtual_device.rs # virtual sink/source node creation
-│   │   └── sampler.rs        # sound file playback
+│   │   ├── engine.rs               # rodio Sink mgmt, tick loop, PCM decode, shared FX chain
+│   │   ├── virtual_device.rs       # in-process PipeWire streams: bridge load, soundboard + mic capture/playback
+│   │   ├── pw_config.rs            # routing plan, mic detection, loopback teardown, drop-in persistence
+│   │   └── sampler.rs              # (legacy helper, mostly superseded by engine)
 │   ├── plugins/
-│   │   ├── mod.rs
-│   │   ├── host.rs           # plugin loader and chain runner
-│   │   ├── lv2.rs            # LV2 plugin adapter
-│   │   └── builtin/          # built-in effects (gain, gate, etc.)
+│   │   ├── mod.rs                  # ResonatePlugin trait, PluginParam, plugin_from_entry factory
+│   │   ├── host.rs                 # PluginChain (Vec<Box<dyn ResonatePlugin>>)
+│   │   ├── lv2.rs                  # LV2 host (livi): Lv2Host, discover(), Lv2Plugin
+│   │   └── builtin/
+│   │       ├── mod.rs
+│   │       ├── gain.rs             # GainPlugin (0.0–4.0x linear)
+│   │       └── gate.rs             # NoiseGatePlugin (RMS, attack/release counters)
 │   └── ui/
-│       ├── soundboard.rs     # soundboard grid view
-│       ├── mixer.rs          # volume/routing controls
-│       └── plugin_rack.rs    # plugin chain editor
-├── data/
-│   ├── io.github.resonate.gschema.xml
-│   ├── io.github.resonate.desktop
-│   └── io.github.resonate.metainfo.xml
+│       ├── mod.rs
+│       ├── soundboard_page.rs      # soundboard grid
+│       ├── sound_tile.rs           # individual tile widget
+│       ├── settings_page.rs        # virtual device / input settings
+│       └── effects_page.rs         # mic effects chain editor
 ├── resources/
-│   └── resources.gresource.xml
+│   ├── resources.gresource.xml
+│   └── ui/
+│       ├── window.ui
+│       ├── soundboard_page.ui
+│       ├── settings_page.ui
+│       └── effects_page.ui
 ├── Cargo.toml
-└── build.rs                  # gresource compilation
+└── build.rs                        # gresource compilation
 ```
 
-## App ID
-
-`io.github.resonate`
+GResource paths use prefix `/io/github/kilo2071/Resonate/`.
 
 ## Build & Run
 
@@ -92,35 +113,106 @@ RUST_LOG=resonate=debug cargo run
 
 ## GObject Subclassing Convention
 
-Follow the `gtk4-rs` book pattern: imp module inside each widget, using `#[derive(CompositeTemplate)]` for UI templates defined in XML.
+Follow the `gtk4-rs` book pattern: `imp` module inside each widget, `#[derive(gtk::CompositeTemplate)]` for UI templates in XML.
 
 ## Audio Architecture
 
+The virtual mic is a PipeWire `module-loopback` **bridge**: an `Audio/Sink`
+(`resonate_sink`) whose playback side is an `Audio/Source` (`resonate_source`,
+shown to other apps as "Resonate Microphone"). Two in-process PipeWire output
+streams feed the sink; PipeWire sums them there.
+
 ```
-[Microphone] → PipeWire → [Plugin Chain] → [Virtual Sink]
-                                                  ↓
-[Soundboard samples] → PipeWire ──────────→ [Virtual Sink]
-                                                  ↓
-                                        [Apps see "Resonate" mic]
+[Microphone] → resonate-mic-capture (Input) → [PluginChain] → mic bridge (Rc<RefCell<VecDeque>>)
+                                                                     ↓
+                                                  resonate-mic (Output) ─┐
+[Soundboard] → rodio + PCM decode → elapsed-time tick() →                ├──▶ resonate_sink
+               audio_queue (Mutex<VecDeque>) → resonate-soundboard (Output) ┘        │
+                                                                                  (bridge)
+                                                                                     ▼
+                                                                            resonate_source
+                                                                     [Apps see "Resonate Microphone"]
 ```
 
-PipeWire node management happens on a dedicated thread; all UI interaction crosses the thread boundary via channels (GLib main loop ↔ PipeWire thread).
+### Bridge creation gotcha
 
-## Plugin Trait (planned)
+`pw-cli load-module` does **not** persist — the module dies when the pw-cli
+client exits, so it can't be used to create the bridge. The session bridge is
+created **in-process** via `pw_sys::pw_context_load_module` on our own
+long-lived context (`virtual_device.rs`); it lives until the context drops. The
+**offline** mic pass-through (mic → sink while Resonate isn't running) is provided
+by a drop-in at `~/.config/pipewire/pipewire.conf.d/resonate.conf`, applied at
+login. On startup, `pw_config::claim_routing` tears down the raw loopback nodes
+(`resonate_mic_in/out`) so the mic isn't fed to the sink twice.
+
+### Thread model
+
+- **GLib main loop** — UI, tick timer (every ~40ms), config saves, FX add/remove/param
+- **PipeWire thread** — soundboard playback + mic capture/playback RT callbacks (no blocking)
+- **Background thread** — PCM decode for soundboard files
+
+### Cross-thread audio transport
+
+- GLib tick → soundboard stream: `audio_queue` (`Arc<Mutex<VecDeque<f32>>>`); UI thread `lock()`, RT callback `try_lock()`
+- mic capture → mic playback: a per-PW-thread `Rc<RefCell<VecDeque<f32>>>` bridge (both callbacks on the same PW thread, no locking)
+- mic effects chain: `Arc<Mutex<PluginChain>>` shared UI↔PW; mutated on UI thread, `try_lock()` in the capture callback
+- capture is channel-aware (mono mics are upmixed to stereo); it pins to the physical mic with `target.object`/`node.target`/`node.dont-reconnect` and never autoconnects to the default (which would be our own source → feedback)
+
+### Elapsed-time mixing
+
+`AudioEngine::tick()` calculates `elapsed_secs` since `last_tick`, converts to sample count `n`, and pushes `n` frames to the virtual device. This avoids relying on `sink.get_pos()` which returns near-zero on PipeWire/cpal.
+
+If PCM is still decoding, `pcm_pos` is advanced speculatively so playback starts mid-stream correctly once the decode completes.
+
+## Plugin Trait
 
 ```rust
 pub trait ResonatePlugin: Send {
     fn name(&self) -> &str;
-    fn process(&mut self, input: &[f32], output: &mut [f32], sample_rate: u32);
+    fn id(&self) -> &str;
+    fn is_enabled(&self) -> bool;
+    fn set_enabled(&mut self, enabled: bool);
+    fn process(&mut self, samples: &mut [f32], sample_rate: u32); // in-place
     fn params(&self) -> Vec<PluginParam>;
     fn set_param(&mut self, id: &str, value: f32);
+}
+```
+
+Processing is in-place (`&mut [f32]`). Chain is applied sequentially in `PluginChain::process()`.
+
+## Config Schema
+
+```rust
+pub struct Config {
+    pub sounds_folder: PathBuf,
+    pub move_files_to_folder: bool,
+    pub polyphonic: bool,
+    pub stop_on_play: bool,
+    pub default_volume: u32,
+    pub virtual_device_name: String,
+    pub virtual_device_enabled: bool,
+    pub monitor_enabled: bool,
+    pub monitor_volume: f32,
+    pub monitor_device_name: String,
+    pub input_device_name: String,
+    pub mic_volume: f32,
+    pub effects_chain: Vec<EffectEntry>,  // default: [gate(disabled), gain(enabled)]
+}
+
+pub struct EffectEntry {
+    pub id: String,                        // "gain" | "gate"
+    pub enabled: bool,
+    pub params: HashMap<String, f32>,      // e.g. {"gain": 1.0}, {"threshold": 0.02, ...}
 }
 ```
 
 ## Coding Conventions
 
 - All GObject subclasses live in an `imp` submodule
-- UI templates in `resources/ui/*.ui` (Blueprint or XML)
+- UI templates in `resources/ui/*.ui` (GTK XML, not Blueprint)
 - Errors propagate with `anyhow::Result`; only panic on programmer errors
 - No `unwrap()` in audio callback paths — log and recover instead
 - PipeWire callbacks are `unsafe`; isolate unsafe blocks as tightly as possible
+- `try_lock()` (non-blocking) in all PipeWire RT callbacks; `lock()` only on UI thread
+- GTK4 switch state-set callbacks must return `glib::Propagation::Proceed` (not `bool`)
+- Use `widget.downgrade()` / `upgrade()` pattern for weak refs in closures that outlive the widget

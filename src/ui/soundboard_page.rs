@@ -21,7 +21,7 @@ mod imp {
     use super::*;
 
     #[derive(gtk::CompositeTemplate)]
-    #[template(resource = "/io/github/resonate/ui/soundboard_page.ui")]
+    #[template(resource = "/io/github/kilo2071/Resonate/ui/soundboard_page.ui")]
     pub struct ResonateSoundboardPage {
         #[template_child]
         pub content_stack: TemplateChild<gtk::Stack>,
@@ -43,6 +43,8 @@ mod imp {
         pub until_next_label: TemplateChild<gtk::Label>,
         #[template_child]
         pub master_volume_scale: TemplateChild<gtk::Scale>,
+        #[template_child]
+        pub monitor_volume_scale: TemplateChild<gtk::Scale>,
 
         pub sounds: RefCell<Vec<SoundEntry>>,
         pub play_fn: RefCell<Option<Box<dyn Fn(PathBuf) + 'static>>>,
@@ -64,6 +66,7 @@ mod imp {
                 total_time_label: Default::default(),
                 until_next_label: Default::default(),
                 master_volume_scale: Default::default(),
+                monitor_volume_scale: Default::default(),
                 sounds: RefCell::new(Vec::new()),
                 play_fn: RefCell::new(None),
                 cue_fn: RefCell::new(None),
@@ -143,6 +146,27 @@ impl ResonateSoundboardPage {
 
     pub fn set_play_pause_sensitive(&self, sensitive: bool) {
         self.imp().play_pause_button.set_sensitive(sensitive);
+    }
+
+    pub fn connect_mic_volume_changed<F: Fn(f32) + 'static>(&self, f: F) {
+        self.imp()
+            .master_volume_scale
+            .connect_value_changed(move |s| f(s.value() as f32 / 100.0));
+    }
+
+    pub fn connect_monitor_volume_changed<F: Fn(f32) + 'static>(&self, f: F) {
+        self.imp()
+            .monitor_volume_scale
+            .connect_value_changed(move |s| f(s.value() as f32 / 100.0));
+    }
+
+    pub fn set_initial_volumes(&self, mic_vol: f32, monitor_vol: f32) {
+        self.imp()
+            .master_volume_scale
+            .set_value((mic_vol * 100.0) as f64);
+        self.imp()
+            .monitor_volume_scale
+            .set_value((monitor_vol * 100.0) as f64);
     }
 
     /// Add a sound and wire its tile buttons. Paths are shared via Rc so rename stays in sync.

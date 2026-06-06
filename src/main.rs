@@ -22,14 +22,14 @@ fn main() -> glib::ExitCode {
     .expect("Failed to load gresource bundle");
     gtk::gio::resources_register(&resources);
 
-    gtk::Window::set_default_icon_name("io.github.resonate");
+    gtk::Window::set_default_icon_name("io.github.kilo2071.Resonate");
 
     if let Some(display) = gtk::gdk::Display::default() {
         let icon_theme = gtk::IconTheme::for_display(&display);
-        icon_theme.add_resource_path("/io/github/resonate/icons");
+        icon_theme.add_resource_path("/io/github/kilo2071/Resonate/icons");
 
         let provider = gtk::CssProvider::new();
-        provider.load_from_resource("/io/github/resonate/style.css");
+        provider.load_from_resource("/io/github/kilo2071/Resonate/style.css");
         gtk::style_context_add_provider_for_display(
             &display,
             &provider,

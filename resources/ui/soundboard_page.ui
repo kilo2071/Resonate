@@ -202,29 +202,66 @@
           </object>
         </child>
 
-        <!-- Master volume -->
+        <!-- Volume controls: mic (virtual device) and monitor stacked -->
         <child>
           <object class="GtkBox">
-            <property name="orientation">horizontal</property>
-            <property name="spacing">8</property>
+            <property name="orientation">vertical</property>
+            <property name="spacing">4</property>
             <property name="valign">center</property>
+            <!-- Mic / virtual device volume -->
             <child>
-              <object class="GtkImage">
-                <property name="icon-name">audio-volume-high-symbolic</property>
+              <object class="GtkBox">
+                <property name="orientation">horizontal</property>
+                <property name="spacing">6</property>
+                <child>
+                  <object class="GtkImage">
+                    <property name="icon-name">audio-input-microphone-symbolic</property>
+                    <property name="tooltip-text" translatable="yes">Virtual mic output level</property>
+                  </object>
+                </child>
+                <child>
+                  <object class="GtkScale" id="master_volume_scale">
+                    <property name="width-request">120</property>
+                    <property name="draw-value">false</property>
+                    <property name="tooltip-text" translatable="yes">Virtual microphone volume</property>
+                    <property name="adjustment">
+                      <object class="GtkAdjustment">
+                        <property name="lower">0</property>
+                        <property name="upper">100</property>
+                        <property name="value">100</property>
+                        <property name="step-increment">1</property>
+                      </object>
+                    </property>
+                  </object>
+                </child>
               </object>
             </child>
+            <!-- Monitor (headphone) volume -->
             <child>
-              <object class="GtkScale" id="master_volume_scale">
-                <property name="width-request">130</property>
-                <property name="draw-value">false</property>
-                <property name="adjustment">
-                  <object class="GtkAdjustment">
-                    <property name="lower">0</property>
-                    <property name="upper">100</property>
-                    <property name="value">100</property>
-                    <property name="step-increment">1</property>
+              <object class="GtkBox">
+                <property name="orientation">horizontal</property>
+                <property name="spacing">6</property>
+                <child>
+                  <object class="GtkImage">
+                    <property name="icon-name">audio-headphones-symbolic</property>
+                    <property name="tooltip-text" translatable="yes">Monitor output level</property>
                   </object>
-                </property>
+                </child>
+                <child>
+                  <object class="GtkScale" id="monitor_volume_scale">
+                    <property name="width-request">120</property>
+                    <property name="draw-value">false</property>
+                    <property name="tooltip-text" translatable="yes">Monitor (headphone) volume</property>
+                    <property name="adjustment">
+                      <object class="GtkAdjustment">
+                        <property name="lower">0</property>
+                        <property name="upper">100</property>
+                        <property name="value">100</property>
+                        <property name="step-increment">1</property>
+                      </object>
+                    </property>
+                  </object>
+                </child>
               </object>
             </child>
           </object>

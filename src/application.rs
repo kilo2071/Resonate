@@ -41,7 +41,7 @@ glib::wrapper! {
 impl ResonateApplication {
     pub fn new() -> Self {
         glib::Object::builder()
-            .property("application-id", "io.github.resonate")
+            .property("application-id", "io.github.kilo2071.Resonate")
             .property("flags", gtk::gio::ApplicationFlags::empty())
             .build()
     }

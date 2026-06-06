@@ -22,7 +22,7 @@ mod imp {
     use super::*;
 
     #[derive(gtk::CompositeTemplate)]
-    #[template(resource = "/io/github/resonate/ui/window.ui")]
+    #[template(resource = "/io/github/kilo2071/Resonate/ui/window.ui")]
     pub struct ResonateWindow {
         #[template_child]
         pub toast_overlay: TemplateChild<adw::ToastOverlay>,
@@ -79,16 +79,77 @@ mod imp {
 
             match AudioEngine::new() {
                 Ok(mut engine) => {
-                    engine.set_polyphonic(self.config.borrow().polyphonic);
+                    let cfg = self.config.borrow().clone();
+                    engine.set_polyphonic(cfg.polyphonic);
+                    engine.set_monitor_volume(cfg.monitor_volume);
+                    engine.set_monitor_enabled(cfg.monitor_enabled);
+                    engine.set_mic_volume(cfg.mic_volume);
                     *self.audio_engine.borrow_mut() = Some(engine);
                 }
                 Err(e) => log::error!("Audio engine init failed: {}", e),
             }
 
+            // Start virtual mic device
+            {
+                let cfg = self.config.borrow().clone();
+                if cfg.virtual_device_enabled {
+                    // Build the mic-effects chain and share it with the PW thread.
+                    let effects = match self.audio_engine.borrow().as_ref() {
+                        Some(e) => {
+                            e.rebuild_effects(&cfg.effects_chain);
+                            e.effects_handle()
+                        }
+                        None => std::sync::Arc::new(std::sync::Mutex::new(
+                            crate::plugins::host::PluginChain::new(),
+                        )),
+                    };
+                    match crate::audio::virtual_device::start(
+                        &cfg.virtual_device_name,
+                        &cfg.input_device_name,
+                        effects,
+                        cfg.mic_volume,
+                    ) {
+                        Ok(dev) => {
+                            if let Some(engine) = self.audio_engine.borrow_mut().as_mut() {
+                                engine.set_virtual_device(dev);
+                            }
+                            // After PipeWire registers the node (~1 s), set it as default input.
+                            glib::timeout_add_local_once(
+                                std::time::Duration::from_millis(1500),
+                                glib::clone!(
+                                    #[weak]
+                                    win,
+                                    move || {
+                                        win.set_virtual_mic_as_default_input();
+                                    }
+                                ),
+                            );
+                        }
+                        Err(e) => log::error!("Virtual device start failed: {}", e),
+                    }
+                }
+            }
+
             win.register_actions();
             win.setup_audio();
+            win.setup_effects();
             win.sync_settings_ui();
             win.scan_sounds_folder();
+
+            // On close, stop our PipeWire thread (drops the bridge + mic streams).
+            // The offline mic pass-through is provided by the drop-in at next login.
+            win.connect_close_request(glib::clone!(
+                #[weak(rename_to = w)]
+                win,
+                #[upgrade_or]
+                glib::Propagation::Proceed,
+                move |_| {
+                    if let Some(e) = w.imp().audio_engine.borrow_mut().as_mut() {
+                        e.virtual_device = None;
+                    }
+                    glib::Propagation::Proceed
+                }
+            ));
         }
     }
 
@@ -131,6 +192,38 @@ impl ResonateWindow {
 
     fn setup_audio(&self) {
         let page = self.imp().soundboard_page.get();
+
+        // Set slider positions from config
+        {
+            let cfg = self.imp().config.borrow().clone();
+            page.set_initial_volumes(cfg.mic_volume, cfg.monitor_volume);
+        }
+
+        // Mic / virtual device volume slider
+        page.connect_mic_volume_changed(glib::clone!(
+            #[weak(rename_to = win)]
+            self,
+            move |v| {
+                win.imp().config.borrow_mut().mic_volume = v;
+                win.imp().config.borrow().save();
+                if let Some(engine) = win.imp().audio_engine.borrow_mut().as_mut() {
+                    engine.set_mic_volume(v);
+                }
+            }
+        ));
+
+        // Monitor (headphone) volume slider
+        page.connect_monitor_volume_changed(glib::clone!(
+            #[weak(rename_to = win)]
+            self,
+            move |v| {
+                win.imp().config.borrow_mut().monitor_volume = v;
+                win.imp().config.borrow().save();
+                if let Some(engine) = win.imp().audio_engine.borrow_mut().as_mut() {
+                    engine.set_monitor_volume(v);
+                }
+            }
+        ));
 
         // Play button on tile → polyphonic/sequential start
         page.set_play_callback(glib::clone!(
@@ -534,6 +627,133 @@ impl ResonateWindow {
         self.imp().toast_overlay.add_toast(toast);
     }
 
+    // ── Effects ───────────────────────────────────────────────────────────────
+
+    fn setup_effects(&self) {
+        let chain = self.imp().config.borrow().effects_chain.clone();
+        let page = self.imp().effects_page.get();
+        page.init_chain(&chain);
+
+        // Relay parameter changes to the engine (and save to config).
+        page.connect_effect_enabled(glib::clone!(
+            #[weak(rename_to = win)]
+            self,
+            move |idx, enabled| {
+                {
+                    let mut cfg = win.imp().config.borrow_mut();
+                    if let Some(e) = cfg.effects_chain.get_mut(idx) {
+                        e.enabled = enabled;
+                    }
+                }
+                win.imp().config.borrow().save();
+                if let Some(engine) = win.imp().audio_engine.borrow().as_ref() {
+                    engine.set_effect_enabled(idx, enabled);
+                }
+            }
+        ));
+
+        page.connect_effect_param(glib::clone!(
+            #[weak(rename_to = win)]
+            self,
+            move |idx, param, value| {
+                {
+                    let mut cfg = win.imp().config.borrow_mut();
+                    if let Some(e) = cfg.effects_chain.get_mut(idx) {
+                        e.params.insert(param.clone(), value);
+                    }
+                }
+                win.imp().config.borrow().save();
+                if let Some(engine) = win.imp().audio_engine.borrow().as_ref() {
+                    engine.set_effect_param(idx, &param, value);
+                }
+            }
+        ));
+
+        // Supplies live parameter metadata so the panel works for LV2 too.
+        page.connect_param_provider(glib::clone!(
+            #[weak(rename_to = win)]
+            self,
+            #[upgrade_or_default]
+            move |idx| {
+                win.imp()
+                    .audio_engine
+                    .borrow()
+                    .as_ref()
+                    .map(|e| e.effect_params(idx))
+                    .unwrap_or_default()
+            }
+        ));
+
+        // Add a new effect: append to config, rebuild the live chain, refresh rows.
+        page.connect_effect_add(glib::clone!(
+            #[weak(rename_to = win)]
+            self,
+            move |id| {
+                let entry = default_entry_for(&id);
+                {
+                    let mut cfg = win.imp().config.borrow_mut();
+                    cfg.effects_chain.push(entry);
+                }
+                win.rebuild_and_refresh_effects();
+            }
+        ));
+
+        // Remove an effect by index.
+        page.connect_effect_remove(glib::clone!(
+            #[weak(rename_to = win)]
+            self,
+            move |idx| {
+                {
+                    let mut cfg = win.imp().config.borrow_mut();
+                    if idx < cfg.effects_chain.len() {
+                        cfg.effects_chain.remove(idx);
+                    }
+                }
+                win.rebuild_and_refresh_effects();
+            }
+        ));
+    }
+
+    /// Persist the chain, rebuild the live engine chain, and refresh the rows.
+    fn rebuild_and_refresh_effects(&self) {
+        let chain = self.imp().config.borrow().effects_chain.clone();
+        self.imp().config.borrow().save();
+        if let Some(engine) = self.imp().audio_engine.borrow().as_ref() {
+            engine.rebuild_effects(&chain);
+        }
+        self.imp().effects_page.get().init_chain(&chain);
+    }
+
+    // ── Virtual mic default ───────────────────────────────────────────────────
+
+    fn set_virtual_mic_as_default_input(&self) {
+        use crate::audio::virtual_device::SOURCE_NAME;
+        let nodes = crate::audio::virtual_device::enumerate_nodes();
+        let Some(node) = nodes
+            .iter()
+            .find(|n| n.name == SOURCE_NAME)
+            .or_else(|| {
+                nodes
+                    .iter()
+                    .find(|n| n.media_class.contains("Source") && n.description.contains("Resonate"))
+            })
+        else {
+            log::warn!("set_virtual_mic_as_default: Resonate source node not found");
+            return;
+        };
+        let id_str = node.id.to_string();
+        match std::process::Command::new("wpctl")
+            .args(["set-default", &id_str])
+            .status()
+        {
+            Ok(s) if s.success() => {
+                log::info!("Set '{}' (id={}) as default audio input", node.description, id_str);
+            }
+            Ok(s) => log::warn!("wpctl set-default {} exited with {}", id_str, s),
+            Err(e) => log::warn!("wpctl not found or failed: {}", e),
+        }
+    }
+
     // ── Settings sync ────────────────────────────────────────────────────────
 
     fn sync_settings_ui(&self) {
@@ -571,5 +791,106 @@ impl ResonateWindow {
                 }
             }
         ));
+
+        // Monitor enabled toggle
+        settings.set_monitor_enabled(config.monitor_enabled);
+        settings.imp().monitor_enabled_row.connect_active_notify(glib::clone!(
+            #[weak(rename_to = win)]
+            self,
+            move |row| {
+                let v = row.is_active();
+                win.imp().config.borrow_mut().monitor_enabled = v;
+                win.imp().config.borrow().save();
+                if let Some(engine) = win.imp().audio_engine.borrow_mut().as_mut() {
+                    engine.set_monitor_enabled(v);
+                }
+            }
+        ));
+
+        // Virtual device autostart
+        settings.set_autostart_virtual_device(config.virtual_device_enabled);
+        settings.imp().autostart_virtual_device_row.connect_active_notify(glib::clone!(
+            #[weak(rename_to = win)]
+            self,
+            move |row| {
+                win.imp().config.borrow_mut().virtual_device_enabled = row.is_active();
+                win.imp().config.borrow().save();
+            }
+        ));
+
+        // Virtual device name — save on change
+        settings.set_virtual_device_name(&config.virtual_device_name);
+        settings.imp().virtual_device_name_row.connect_changed(glib::clone!(
+            #[weak(rename_to = win)]
+            self,
+            move |row| {
+                use gtk::prelude::EditableExt;
+                win.imp().config.borrow_mut().virtual_device_name = row.text().to_string();
+                win.imp().config.borrow().save();
+            }
+        ));
+
+        // Enumerate audio devices and populate combo rows
+        let nodes = crate::audio::virtual_device::enumerate_nodes();
+        let sources: Vec<String> = nodes
+            .iter()
+            .filter(|n| n.media_class.contains("Source") && !n.name.starts_with("resonate"))
+            .map(|n| n.description.clone())
+            .collect();
+        let sinks: Vec<String> = nodes
+            .iter()
+            .filter(|n| n.media_class.contains("Sink") && !n.name.starts_with("resonate"))
+            .map(|n| n.description.clone())
+            .collect();
+        settings.set_input_device_list(&sources, &config.input_device_name);
+        settings.set_monitor_device_list(&sinks, &config.monitor_device_name);
+
+        // Save device selection when changed
+        let sources_for_cb = sources.clone();
+        settings.imp().input_device_row.connect_selected_notify(glib::clone!(
+            #[weak(rename_to = win)]
+            self,
+            move |row| {
+                let idx = row.selected() as usize;
+                let name = if idx == 0 {
+                    String::new()
+                } else {
+                    sources_for_cb.get(idx - 1).cloned().unwrap_or_default()
+                };
+                win.imp().config.borrow_mut().input_device_name = name;
+                win.imp().config.borrow().save();
+            }
+        ));
+
+        let sinks_for_cb = sinks.clone();
+        settings.imp().monitor_device_row.connect_selected_notify(glib::clone!(
+            #[weak(rename_to = win)]
+            self,
+            move |row| {
+                let idx = row.selected() as usize;
+                let name = if idx == 0 {
+                    String::new()
+                } else {
+                    sinks_for_cb.get(idx - 1).cloned().unwrap_or_default()
+                };
+                win.imp().config.borrow_mut().monitor_device_name = name;
+                win.imp().config.borrow().save();
+            }
+        ));
+    }
+}
+
+/// Default config entry for a newly-added effect. Built-ins get sensible defaults;
+/// LV2 entries start with no param overrides (the plugin's own defaults apply).
+fn default_entry_for(id: &str) -> crate::config::EffectEntry {
+    use crate::config::EffectEntry;
+    match id {
+        "gain" => EffectEntry::gain(1.0, true),
+        "gate" => EffectEntry::gate(0.02, 10.0, 100.0, true),
+        other => EffectEntry {
+            id: other.to_string(),
+            enabled: true,
+            params: std::collections::HashMap::new(),
+        },
     }
 }

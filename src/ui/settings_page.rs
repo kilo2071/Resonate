@@ -6,7 +6,7 @@ mod imp {
     use super::*;
 
     #[derive(Default, gtk::CompositeTemplate)]
-    #[template(resource = "/io/github/resonate/ui/settings_page.ui")]
+    #[template(resource = "/io/github/kilo2071/Resonate/ui/settings_page.ui")]
     pub struct ResonateSettingsPage {
         #[template_child]
         pub sounds_folder_row: TemplateChild<adw::ActionRow>,
@@ -73,6 +73,42 @@ impl ResonateSettingsPage {
 
     pub fn set_move_files_active(&self, active: bool) {
         self.imp().move_files_row.set_active(active);
+    }
+
+    /// Populate input device combo and select the previously saved device.
+    /// Returns the device names list (offset 1 = index 0 is "System Default").
+    pub fn set_input_device_list(&self, names: &[String], saved: &str) {
+        let all: Vec<&str> = std::iter::once("System Default")
+            .chain(names.iter().map(|s| s.as_str()))
+            .collect();
+        let list = gtk::StringList::new(&all);
+        self.imp().input_device_row.set_model(Some(&list));
+        // Restore previously selected device
+        let idx = names.iter().position(|n| n == saved).map(|i| i + 1).unwrap_or(0);
+        self.imp().input_device_row.set_selected(idx as u32);
+    }
+
+    /// Populate monitor device combo and select the previously saved device.
+    pub fn set_monitor_device_list(&self, names: &[String], saved: &str) {
+        let all: Vec<&str> = std::iter::once("System Default")
+            .chain(names.iter().map(|s| s.as_str()))
+            .collect();
+        let list = gtk::StringList::new(&all);
+        self.imp().monitor_device_row.set_model(Some(&list));
+        let idx = names.iter().position(|n| n == saved).map(|i| i + 1).unwrap_or(0);
+        self.imp().monitor_device_row.set_selected(idx as u32);
+    }
+
+    pub fn set_virtual_device_name(&self, name: &str) {
+        self.imp().virtual_device_name_row.set_text(name);
+    }
+
+    pub fn set_autostart_virtual_device(&self, active: bool) {
+        self.imp().autostart_virtual_device_row.set_active(active);
+    }
+
+    pub fn set_monitor_enabled(&self, active: bool) {
+        self.imp().monitor_enabled_row.set_active(active);
     }
 }
 
