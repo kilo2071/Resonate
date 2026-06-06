@@ -4,29 +4,17 @@
   <requires lib="libadwaita" version="1.0"/>
   <template class="ResonateSoundTile" parent="GtkBox">
     <property name="orientation">vertical</property>
-    <property name="spacing">8</property>
+    <property name="spacing">0</property>
     <property name="width-request">170</property>
     <property name="height-request">190</property>
-    <property name="margin-top">10</property>
-    <property name="margin-bottom">10</property>
-    <property name="margin-start">10</property>
-    <property name="margin-end">10</property>
+    <property name="margin-top">8</property>
+    <property name="margin-bottom">8</property>
+    <property name="margin-start">8</property>
+    <property name="margin-end">8</property>
     <style>
       <class name="card"/>
     </style>
-    <!-- Context menu model -->
-    <menu id="tile_menu">
-      <section>
-        <item>
-          <attribute name="label" translatable="yes">Rename…</attribute>
-          <attribute name="action">tile.rename</attribute>
-        </item>
-        <item>
-          <attribute name="label" translatable="yes">Remove</attribute>
-          <attribute name="action">tile.remove</attribute>
-        </item>
-      </section>
-    </menu>
+
     <!-- Header row: number + spacer + overflow menu -->
     <child>
       <object class="GtkBox">
@@ -53,16 +41,47 @@
           <object class="GtkMenuButton" id="menu_button">
             <property name="icon-name">view-more-symbolic</property>
             <property name="has-frame">false</property>
-            <property name="menu-model">tile_menu</property>
             <style>
               <class name="circular"/>
               <class name="flat"/>
             </style>
+            <property name="popover">
+              <object class="GtkPopover">
+                <property name="child">
+                  <object class="GtkBox">
+                    <property name="orientation">vertical</property>
+                    <property name="margin-top">4</property>
+                    <property name="margin-bottom">4</property>
+                    <property name="margin-start">4</property>
+                    <property name="margin-end">4</property>
+                    <property name="spacing">2</property>
+                    <child>
+                      <object class="GtkButton" id="rename_button">
+                        <property name="label" translatable="yes">Rename…</property>
+                        <style>
+                          <class name="flat"/>
+                        </style>
+                      </object>
+                    </child>
+                    <child>
+                      <object class="GtkButton" id="remove_button">
+                        <property name="label" translatable="yes">Remove</property>
+                        <style>
+                          <class name="flat"/>
+                          <class name="destructive-action"/>
+                        </style>
+                      </object>
+                    </child>
+                  </object>
+                </property>
+              </object>
+            </property>
           </object>
         </child>
       </object>
     </child>
-    <!-- Sound name -->
+
+    <!-- Sound name — more breathing room with margins -->
     <child>
       <object class="GtkLabel" id="name_label">
         <property name="label" translatable="yes">Sound</property>
@@ -73,17 +92,23 @@
         <property name="justify">center</property>
         <property name="max-width-chars">11</property>
         <property name="valign">center</property>
+        <property name="margin-start">12</property>
+        <property name="margin-end">12</property>
+        <property name="margin-top">4</property>
+        <property name="margin-bottom">4</property>
         <style>
           <class name="title-2"/>
         </style>
       </object>
     </child>
+
     <!-- Play + Cue buttons -->
     <child>
       <object class="GtkBox">
         <property name="orientation">horizontal</property>
         <property name="halign">center</property>
         <property name="spacing">10</property>
+        <property name="margin-bottom">6</property>
         <child>
           <object class="GtkButton" id="play_button">
             <property name="icon-name">media-playback-start-symbolic</property>
@@ -97,7 +122,7 @@
         <child>
           <object class="GtkButton" id="cue_button">
             <property name="icon-name">media-skip-forward-symbolic</property>
-            <property name="tooltip-text" translatable="yes">Cue — play after current sound</property>
+            <property name="tooltip-text" translatable="yes">Add to queue</property>
             <style>
               <class name="circular"/>
             </style>
@@ -105,13 +130,14 @@
         </child>
       </object>
     </child>
+
     <!-- Per-tile volume -->
     <child>
       <object class="GtkBox">
         <property name="orientation">horizontal</property>
         <property name="spacing">6</property>
-        <property name="margin-start">10</property>
-        <property name="margin-end">10</property>
+        <property name="margin-start">12</property>
+        <property name="margin-end">12</property>
         <property name="margin-bottom">10</property>
         <child>
           <object class="GtkImage">

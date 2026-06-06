@@ -7,59 +7,63 @@
     <property name="default-width">1100</property>
     <property name="default-height">700</property>
     <child>
-      <object class="AdwToolbarView">
-        <child type="top">
-          <object class="AdwHeaderBar">
-            <child type="end">
-              <object class="GtkButton" id="add_sound_button">
-                <property name="icon-name">list-add-symbolic</property>
-                <property name="tooltip-text" translatable="yes">Add sound files</property>
-                <property name="action-name">win.add-files</property>
-                <style>
-                  <class name="suggested-action"/>
-                </style>
+      <object class="AdwToastOverlay" id="toast_overlay">
+        <property name="child">
+          <object class="AdwToolbarView">
+            <child type="top">
+              <object class="AdwHeaderBar">
+                <child type="end">
+                  <object class="GtkButton" id="add_sound_button">
+                    <property name="icon-name">list-add-symbolic</property>
+                    <property name="tooltip-text" translatable="yes">Add sound files</property>
+                    <property name="action-name">win.add-files</property>
+                    <style>
+                      <class name="suggested-action"/>
+                    </style>
+                  </object>
+                </child>
+                <property name="title-widget">
+                  <object class="AdwViewSwitcher">
+                    <property name="stack">main_stack</property>
+                    <property name="policy">wide</property>
+                  </object>
+                </property>
               </object>
             </child>
-            <property name="title-widget">
-              <object class="AdwViewSwitcher">
-                <property name="stack">main_stack</property>
-                <property name="policy">wide</property>
+            <property name="content">
+              <object class="AdwViewStack" id="main_stack">
+                <child>
+                  <object class="AdwViewStackPage">
+                    <property name="name">soundboard</property>
+                    <property name="title" translatable="yes">Soundboard</property>
+                    <property name="icon-name">audio-speakers-symbolic</property>
+                    <property name="child">
+                      <object class="ResonateSoundboardPage" id="soundboard_page"/>
+                    </property>
+                  </object>
+                </child>
+                <child>
+                  <object class="AdwViewStackPage">
+                    <property name="name">effects</property>
+                    <property name="title" translatable="yes">Effects</property>
+                    <property name="icon-name">audio-card-symbolic</property>
+                    <property name="child">
+                      <object class="ResonateEffectsPage" id="effects_page"/>
+                    </property>
+                  </object>
+                </child>
+                <child>
+                  <object class="AdwViewStackPage">
+                    <property name="name">settings</property>
+                    <property name="title" translatable="yes">Settings</property>
+                    <property name="icon-name">preferences-system-symbolic</property>
+                    <property name="child">
+                      <object class="ResonateSettingsPage" id="settings_page"/>
+                    </property>
+                  </object>
+                </child>
               </object>
             </property>
-          </object>
-        </child>
-        <property name="content">
-          <object class="AdwViewStack" id="main_stack">
-            <child>
-              <object class="AdwViewStackPage">
-                <property name="name">soundboard</property>
-                <property name="title" translatable="yes">Soundboard</property>
-                <property name="icon-name">audio-speakers-symbolic</property>
-                <property name="child">
-                  <object class="ResonateSoundboardPage" id="soundboard_page"/>
-                </property>
-              </object>
-            </child>
-            <child>
-              <object class="AdwViewStackPage">
-                <property name="name">effects</property>
-                <property name="title" translatable="yes">Effects</property>
-                <property name="icon-name">audio-card-symbolic</property>
-                <property name="child">
-                  <object class="ResonateEffectsPage" id="effects_page"/>
-                </property>
-              </object>
-            </child>
-            <child>
-              <object class="AdwViewStackPage">
-                <property name="name">settings</property>
-                <property name="title" translatable="yes">Settings</property>
-                <property name="icon-name">preferences-system-symbolic</property>
-                <property name="child">
-                  <object class="ResonateSettingsPage" id="settings_page"/>
-                </property>
-              </object>
-            </child>
           </object>
         </property>
       </object>

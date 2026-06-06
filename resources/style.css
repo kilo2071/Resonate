@@ -14,6 +14,13 @@
     letter-spacing: 0.04em;
 }
 
+/* Multi-line playing list inside the LCD panel */
+.lcd-content {
+    font-family: "Noto Sans Mono", "Source Code Pro", monospace;
+    font-size: 1.0rem;
+    color: #57e389;
+}
+
 /* Coming Soon overlay on the Effects tab */
 .coming-soon-overlay {
     background-color: alpha(#000000, 0.62);

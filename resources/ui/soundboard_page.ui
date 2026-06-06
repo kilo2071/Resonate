@@ -38,7 +38,7 @@
                     <property name="margin-end">6</property>
                     <property name="min-children-per-line">2</property>
                     <property name="max-children-per-line">10</property>
-                    <property name="selection-mode">single</property>
+                    <property name="selection-mode">none</property>
                     <property name="valign">start</property>
                     <property name="halign">fill</property>
                     <property name="homogeneous">true</property>
@@ -62,11 +62,11 @@
     <child>
       <object class="GtkBox">
         <property name="orientation">horizontal</property>
-        <property name="spacing">16</property>
-        <property name="margin-top">14</property>
-        <property name="margin-bottom">14</property>
-        <property name="margin-start">16</property>
-        <property name="margin-end">16</property>
+        <property name="spacing">12</property>
+        <property name="margin-top">10</property>
+        <property name="margin-bottom">10</property>
+        <property name="margin-start">14</property>
+        <property name="margin-end">14</property>
 
         <!-- Transport controls -->
         <child>
@@ -87,7 +87,7 @@
             <child>
               <object class="GtkButton" id="skip_button">
                 <property name="icon-name">media-skip-forward-symbolic</property>
-                <property name="tooltip-text" translatable="yes">Skip to next queued sound</property>
+                <property name="tooltip-text" translatable="yes">Skip next in queue</property>
                 <style>
                   <class name="circular"/>
                   <class name="flat"/>
@@ -97,7 +97,7 @@
             <child>
               <object class="GtkButton" id="stop_all_button">
                 <property name="icon-name">media-playback-stop-symbolic</property>
-                <property name="tooltip-text" translatable="yes">Stop all sounds</property>
+                <property name="tooltip-text" translatable="yes">Stop all &amp; clear queue</property>
                 <style>
                   <class name="circular"/>
                   <class name="destructive-action"/>
@@ -113,44 +113,30 @@
           </object>
         </child>
 
-        <!-- Now-playing info: name + LCD timer on one row, progress bar below -->
+        <!-- Full-width LCD panel: playing list + queue + progress bar -->
         <child>
           <object class="GtkBox">
             <property name="orientation">vertical</property>
-            <property name="spacing">5</property>
+            <property name="spacing">6</property>
             <property name="hexpand">true</property>
             <property name="valign">center</property>
+            <property name="margin-top">6</property>
+            <property name="margin-bottom">6</property>
+            <property name="margin-start">10</property>
+            <property name="margin-end">10</property>
+            <style>
+              <class name="lcd-panel"/>
+            </style>
             <child>
-              <object class="GtkBox">
-                <property name="orientation">horizontal</property>
-                <child>
-                  <object class="GtkLabel" id="now_playing_label">
-                    <property name="label" translatable="yes">Nothing playing</property>
-                    <property name="xalign">0</property>
-                    <property name="hexpand">true</property>
-                    <property name="ellipsize">end</property>
-                    <style>
-                      <class name="title-4"/>
-                    </style>
-                  </object>
-                </child>
-                <child>
-                  <object class="GtkBox">
-                    <property name="valign">center</property>
-                    <property name="margin-start">12</property>
-                    <style>
-                      <class name="lcd-panel"/>
-                    </style>
-                    <child>
-                      <object class="GtkLabel" id="time_remaining_label">
-                        <property name="label">—:——</property>
-                        <style>
-                          <class name="lcd-timer"/>
-                        </style>
-                      </object>
-                    </child>
-                  </object>
-                </child>
+              <object class="GtkLabel" id="now_playing_label">
+                <property name="use-markup">true</property>
+                <property name="xalign">0</property>
+                <property name="label">Nothing playing</property>
+                <property name="wrap">false</property>
+                <property name="ellipsize">none</property>
+                <style>
+                  <class name="lcd-content"/>
+                </style>
               </object>
             </child>
             <child>
@@ -180,7 +166,7 @@
             </child>
             <child>
               <object class="GtkScale" id="master_volume_scale">
-                <property name="width-request">140</property>
+                <property name="width-request">130</property>
                 <property name="draw-value">false</property>
                 <property name="adjustment">
                   <object class="GtkAdjustment">

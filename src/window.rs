@@ -25,6 +25,8 @@ mod imp {
     #[template(resource = "/io/github/resonate/ui/window.ui")]
     pub struct ResonateWindow {
         #[template_child]
+        pub toast_overlay: TemplateChild<adw::ToastOverlay>,
+        #[template_child]
         pub add_sound_button: TemplateChild<gtk::Button>,
         #[template_child]
         pub soundboard_page: TemplateChild<ResonateSoundboardPage>,
@@ -40,6 +42,7 @@ mod imp {
     impl Default for ResonateWindow {
         fn default() -> Self {
             Self {
+                toast_overlay: Default::default(),
                 add_sound_button: Default::default(),
                 soundboard_page: Default::default(),
                 effects_page: Default::default(),
@@ -75,7 +78,10 @@ mod imp {
             let win = self.obj();
 
             match AudioEngine::new() {
-                Ok(engine) => *self.audio_engine.borrow_mut() = Some(engine),
+                Ok(mut engine) => {
+                    engine.set_polyphonic(self.config.borrow().polyphonic);
+                    *self.audio_engine.borrow_mut() = Some(engine);
+                }
                 Err(e) => log::error!("Audio engine init failed: {}", e),
             }
 
@@ -124,16 +130,14 @@ impl ResonateWindow {
     }
 
     fn setup_audio(&self) {
-        // Wire tile play buttons → engine
-        self.imp().soundboard_page.set_play_callback(glib::clone!(
+        let page = self.imp().soundboard_page.get();
+
+        // Play button on tile → polyphonic/sequential start
+        page.set_play_callback(glib::clone!(
             #[weak(rename_to = win)]
             self,
             move |path| {
-                let name = path
-                    .file_stem()
-                    .and_then(|s| s.to_str())
-                    .unwrap_or("Sound")
-                    .to_string();
+                let name = path.file_stem().and_then(|s| s.to_str()).unwrap_or("Sound").to_string();
                 if let Some(engine) = win.imp().audio_engine.borrow_mut().as_mut() {
                     if let Err(e) = engine.play(&path, &name) {
                         log::error!("Playback failed: {}", e);
@@ -142,30 +146,79 @@ impl ResonateWindow {
             }
         ));
 
-        // Stop all button
-        self.imp().soundboard_page.connect_stop_all(glib::clone!(
+        // Cue button → always queue
+        page.set_cue_callback(glib::clone!(
+            #[weak(rename_to = win)]
+            self,
+            move |path| {
+                let name = path.file_stem().and_then(|s| s.to_str()).unwrap_or("Sound").to_string();
+                if let Some(engine) = win.imp().audio_engine.borrow_mut().as_mut() {
+                    // Temporarily force sequential to push to queue
+                    let was_poly = engine.polyphonic();
+                    engine.set_polyphonic(false);
+                    // If nothing playing, this starts it; if something is playing it queues.
+                    // For cue we always want to queue even if poly is on, so force into queue:
+                    if engine.is_anything_playing() {
+                        engine.set_polyphonic(false);
+                    }
+                    if let Err(e) = engine.play(&path, &name) {
+                        log::error!("Cue failed: {}", e);
+                    }
+                    engine.set_polyphonic(was_poly);
+                }
+            }
+        ));
+
+        // Rename / Remove callbacks
+        page.set_rename_callback(glib::clone!(
+            #[weak(rename_to = win)]
+            self,
+            move |path| win.show_rename_dialog(path)
+        ));
+
+        page.set_remove_callback(glib::clone!(
+            #[weak(rename_to = win)]
+            self,
+            move |path| win.confirm_remove_sound(path)
+        ));
+
+        // Stop all
+        page.connect_stop_all(glib::clone!(
             #[weak(rename_to = win)]
             self,
             move || {
                 if let Some(engine) = win.imp().audio_engine.borrow_mut().as_mut() {
-                    engine.stop();
+                    engine.stop_all();
                 }
-                win.imp().soundboard_page.set_now_playing(None, 0.0, None);
+                win.imp()
+                    .soundboard_page
+                    .update_playback_display(&[], &[]);
             }
         ));
 
-        // Play/pause button
-        self.imp().soundboard_page.connect_play_pause(glib::clone!(
+        // Play/pause toggle in bar
+        page.connect_play_pause(glib::clone!(
             #[weak(rename_to = win)]
             self,
             move || {
                 if let Some(engine) = win.imp().audio_engine.borrow_mut().as_mut() {
-                    engine.pause_or_resume();
+                    engine.toggle_pause();
                 }
             }
         ));
 
-        // Progress update timer (every 100 ms)
+        // Skip: remove first queued item and try to start it immediately
+        page.connect_skip(glib::clone!(
+            #[weak(rename_to = win)]
+            self,
+            move || {
+                if let Some(engine) = win.imp().audio_engine.borrow_mut().as_mut() {
+                    engine.skip_queue();
+                }
+            }
+        ));
+
+        // Progress timer — 100 ms
         glib::timeout_add_local(
             std::time::Duration::from_millis(100),
             glib::clone!(
@@ -174,35 +227,34 @@ impl ResonateWindow {
                 #[upgrade_or]
                 glib::ControlFlow::Break,
                 move || {
-                    let state = win
+                    let (playing, queue) = {
+                        if let Some(engine) = win.imp().audio_engine.borrow_mut().as_mut() {
+                            engine.tick()
+                        } else {
+                            (vec![], vec![])
+                        }
+                    };
+
+                    let sb = win.imp().soundboard_page.get();
+                    sb.update_playback_display(&playing, &queue);
+
+                    // Update play/pause button icon
+                    let active = win
                         .imp()
                         .audio_engine
                         .borrow()
                         .as_ref()
-                        .and_then(|e| e.playback_progress());
+                        .map(|e| e.is_anything_playing() && !e.is_all_paused())
+                        .unwrap_or(false);
+                    sb.set_play_pause_icon(active);
 
-                    let finished = win
-                        .imp()
-                        .audio_engine
-                        .borrow()
-                        .as_ref()
-                        .map(|e| e.is_finished())
-                        .unwrap_or(true);
-
-                    if finished && state.is_none() {
-                        win.imp().soundboard_page.set_now_playing(None, 0.0, None);
-                    } else if let Some((frac, remaining, name)) = state {
-                        win.imp().soundboard_page.set_now_playing(
-                            Some(&name),
-                            frac,
-                            remaining,
-                        );
-                    }
                     glib::ControlFlow::Continue
                 }
             ),
         );
     }
+
+    // ── File picker ──────────────────────────────────────────────────────────
 
     fn audio_filter() -> gtk::FileFilter {
         let f = gtk::FileFilter::new();
@@ -284,7 +336,6 @@ impl ResonateWindow {
         self.imp().soundboard_page.add_sound_from_path(final_path);
     }
 
-    /// Scan the sounds folder on startup (files are already there — no moving).
     fn scan_sounds_folder(&self) {
         let folder = self.imp().config.borrow().sounds_folder.clone();
         let Ok(entries) = std::fs::read_dir(&folder) else {
@@ -322,6 +373,172 @@ impl ResonateWindow {
         src
     }
 
+    // ── Rename ───────────────────────────────────────────────────────────────
+
+    fn show_rename_dialog(&self, path: PathBuf) {
+        let current_name = path
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("")
+            .to_string();
+
+        let entry = gtk::Entry::builder()
+            .text(&current_name)
+            .placeholder_text("New name")
+            .activates_default(true)
+            .margin_top(8)
+            .margin_bottom(4)
+            .margin_start(4)
+            .margin_end(4)
+            .build();
+
+        let dialog = adw::AlertDialog::new(
+            Some("Rename Sound"),
+            Some("Enter a new name for this sound."),
+        );
+        dialog.add_response("cancel", "Cancel");
+        dialog.add_response("rename", "Rename");
+        dialog.set_response_appearance("rename", adw::ResponseAppearance::Suggested);
+        dialog.set_default_response(Some("rename"));
+        dialog.set_close_response("cancel");
+        dialog.set_extra_child(Some(&entry));
+
+        dialog.connect_response(
+            None,
+            glib::clone!(
+                #[weak(rename_to = win)]
+                self,
+                #[weak]
+                entry,
+                move |_, response| {
+                    if response == "rename" {
+                        let new_name = entry.text().trim().to_string();
+                        if !new_name.is_empty() && new_name != current_name {
+                            win.do_rename_sound(path.clone(), new_name);
+                        }
+                    }
+                }
+            ),
+        );
+
+        dialog.present(Some(self));
+    }
+
+    fn do_rename_sound(&self, old_path: PathBuf, new_name: String) {
+        let ext = old_path.extension().map(|e| e.to_os_string());
+        let parent = old_path
+            .parent()
+            .map(|p| p.to_path_buf())
+            .unwrap_or_default();
+
+        let mut new_path = parent.join(&new_name);
+        if let Some(e) = ext {
+            new_path.set_extension(e);
+        }
+
+        if let Err(e) = std::fs::rename(&old_path, &new_path) {
+            log::error!("Rename failed: {}", e);
+            let toast = adw::Toast::new(&format!("Rename failed: {e}"));
+            self.imp().toast_overlay.add_toast(toast);
+            return;
+        }
+
+        self.imp()
+            .soundboard_page
+            .rename_sound_by_path(&old_path, new_name.clone(), new_path);
+
+        let toast = adw::Toast::new(&format!("Renamed to \"{new_name}\""));
+        self.imp().toast_overlay.add_toast(toast);
+    }
+
+    // ── Remove + undo ────────────────────────────────────────────────────────
+
+    fn confirm_remove_sound(&self, path: PathBuf) {
+        let name = path
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("Sound")
+            .to_string();
+
+        let dialog = adw::AlertDialog::new(
+            Some("Remove Sound"),
+            Some(&format!(
+                "\"{name}\" will be permanently deleted from your Sounds Folder."
+            )),
+        );
+        dialog.add_response("cancel", "Cancel");
+        dialog.add_response("delete", "Delete");
+        dialog.set_response_appearance("delete", adw::ResponseAppearance::Destructive);
+        dialog.set_default_response(Some("cancel"));
+        dialog.set_close_response("cancel");
+
+        dialog.connect_response(
+            None,
+            glib::clone!(
+                #[weak(rename_to = win)]
+                self,
+                move |_, response| {
+                    if response == "delete" {
+                        win.do_remove_sound(path.clone(), name.clone());
+                    }
+                }
+            ),
+        );
+
+        dialog.present(Some(self));
+    }
+
+    fn do_remove_sound(&self, path: PathBuf, name: String) {
+        // Stop the sound in the engine if it is currently playing
+        if let Some(engine) = self.imp().audio_engine.borrow_mut().as_mut() {
+            engine.stop_sound_by_path(&path);
+        }
+
+        // Move to temp location so we can undo
+        let ts = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .subsec_millis();
+        let temp_path = std::env::temp_dir().join(format!("resonate_undo_{ts}"));
+        let _ = std::fs::rename(&path, &temp_path);
+
+        // Remove from UI
+        self.imp().soundboard_page.remove_sound_by_path(&path);
+
+        // Undo toast
+        let toast = adw::Toast::builder()
+            .title(format!("Removed \"{name}\""))
+            .button_label("Undo")
+            .timeout(6)
+            .build();
+
+        let path_restore = path.clone();
+        let temp_restore = temp_path.clone();
+        toast.connect_button_clicked(glib::clone!(
+            #[weak(rename_to = win)]
+            self,
+            move |_| {
+                if std::fs::rename(&temp_restore, &path_restore).is_ok() {
+                    win.imp()
+                        .soundboard_page
+                        .add_sound_from_path(path_restore.clone());
+                }
+            }
+        ));
+
+        let temp_for_dismiss = temp_path.clone();
+        toast.connect_dismissed(move |_| {
+            // If temp file still exists the undo button was not used — delete permanently
+            if temp_for_dismiss.exists() {
+                let _ = std::fs::remove_file(&temp_for_dismiss);
+            }
+        });
+
+        self.imp().toast_overlay.add_toast(toast);
+    }
+
+    // ── Settings sync ────────────────────────────────────────────────────────
+
     fn sync_settings_ui(&self) {
         let config = self.imp().config.borrow().clone();
         let display = config.sounds_folder.to_string_lossy().to_string();
@@ -341,6 +558,20 @@ impl ResonateWindow {
             move |row| {
                 win.imp().config.borrow_mut().move_files_to_folder = row.is_active();
                 win.imp().config.borrow().save();
+            }
+        ));
+
+        // Polyphonic toggle → update engine
+        settings.imp().polyphonic_row.connect_active_notify(glib::clone!(
+            #[weak(rename_to = win)]
+            self,
+            move |row| {
+                let v = row.is_active();
+                win.imp().config.borrow_mut().polyphonic = v;
+                win.imp().config.borrow().save();
+                if let Some(engine) = win.imp().audio_engine.borrow_mut().as_mut() {
+                    engine.set_polyphonic(v);
+                }
             }
         ));
     }

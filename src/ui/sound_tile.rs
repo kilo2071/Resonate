@@ -20,6 +20,10 @@ mod imp {
         pub volume_scale: TemplateChild<gtk::Scale>,
         #[template_child]
         pub menu_button: TemplateChild<gtk::MenuButton>,
+        #[template_child]
+        pub rename_button: TemplateChild<gtk::Button>,
+        #[template_child]
+        pub remove_button: TemplateChild<gtk::Button>,
     }
 
     #[glib::object_subclass]
@@ -70,6 +74,32 @@ impl ResonateSoundTile {
 
     pub fn connect_cue<F: Fn() + 'static>(&self, f: F) {
         self.imp().cue_button.connect_clicked(move |_| f());
+    }
+
+    pub fn connect_rename<F: Fn() + 'static>(&self, f: F) {
+        self.imp().rename_button.connect_clicked(glib::clone!(
+            #[weak(rename_to = tile)]
+            self,
+            move |_| {
+                if let Some(p) = tile.imp().menu_button.popover() {
+                    p.popdown();
+                }
+                f();
+            }
+        ));
+    }
+
+    pub fn connect_remove<F: Fn() + 'static>(&self, f: F) {
+        self.imp().remove_button.connect_clicked(glib::clone!(
+            #[weak(rename_to = tile)]
+            self,
+            move |_| {
+                if let Some(p) = tile.imp().menu_button.popover() {
+                    p.popdown();
+                }
+                f();
+            }
+        ));
     }
 
     pub fn volume(&self) -> f64 {
