@@ -146,25 +146,14 @@ impl ResonateWindow {
             }
         ));
 
-        // Cue button → always queue
+        // Cue button → always queue regardless of polyphonic mode
         page.set_cue_callback(glib::clone!(
             #[weak(rename_to = win)]
             self,
             move |path| {
                 let name = path.file_stem().and_then(|s| s.to_str()).unwrap_or("Sound").to_string();
                 if let Some(engine) = win.imp().audio_engine.borrow_mut().as_mut() {
-                    // Temporarily force sequential to push to queue
-                    let was_poly = engine.polyphonic();
-                    engine.set_polyphonic(false);
-                    // If nothing playing, this starts it; if something is playing it queues.
-                    // For cue we always want to queue even if poly is on, so force into queue:
-                    if engine.is_anything_playing() {
-                        engine.set_polyphonic(false);
-                    }
-                    if let Err(e) = engine.play(&path, &name) {
-                        log::error!("Cue failed: {}", e);
-                    }
-                    engine.set_polyphonic(was_poly);
+                    engine.cue(&path, &name);
                 }
             }
         ));
@@ -190,9 +179,10 @@ impl ResonateWindow {
                 if let Some(engine) = win.imp().audio_engine.borrow_mut().as_mut() {
                     engine.stop_all();
                 }
-                win.imp()
-                    .soundboard_page
-                    .update_playback_display(&[], &[]);
+                let sb = win.imp().soundboard_page.get();
+                sb.update_playback_display(&[], &[]);
+                sb.set_play_pause_sensitive(false);
+                sb.set_play_pause_icon(false);
             }
         ));
 
@@ -237,8 +227,8 @@ impl ResonateWindow {
 
                     let sb = win.imp().soundboard_page.get();
                     sb.update_playback_display(&playing, &queue);
+                    sb.set_play_pause_sensitive(!playing.is_empty());
 
-                    // Update play/pause button icon
                     let active = win
                         .imp()
                         .audio_engine
@@ -489,23 +479,30 @@ impl ResonateWindow {
     }
 
     fn do_remove_sound(&self, path: PathBuf, name: String) {
-        // Stop the sound in the engine if it is currently playing
         if let Some(engine) = self.imp().audio_engine.borrow_mut().as_mut() {
             engine.stop_sound_by_path(&path);
         }
 
-        // Move to temp location so we can undo
+        // Use as_millis() for a unique timestamp (subsec_millis repeats every second)
         let ts = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default()
-            .subsec_millis();
+            .as_millis();
         let temp_path = std::env::temp_dir().join(format!("resonate_undo_{ts}"));
-        let _ = std::fs::rename(&path, &temp_path);
 
-        // Remove from UI
+        // rename(2) fails with EXDEV across filesystems (/tmp is tmpfs, sounds folder is ext4).
+        // Fall back to copy + delete so the file always leaves the Sounds Folder.
+        let moved = std::fs::rename(&path, &temp_path).is_ok()
+            || (std::fs::copy(&path, &temp_path).is_ok()
+                && std::fs::remove_file(&path).is_ok());
+
+        if !moved {
+            log::error!("Could not move '{}' to temp; deleting directly", path.display());
+            let _ = std::fs::remove_file(&path);
+        }
+
         self.imp().soundboard_page.remove_sound_by_path(&path);
 
-        // Undo toast
         let toast = adw::Toast::builder()
             .title(format!("Removed \"{name}\""))
             .button_label("Undo")
@@ -518,17 +515,17 @@ impl ResonateWindow {
             #[weak(rename_to = win)]
             self,
             move |_| {
-                if std::fs::rename(&temp_restore, &path_restore).is_ok() {
-                    win.imp()
-                        .soundboard_page
-                        .add_sound_from_path(path_restore.clone());
+                let restored = std::fs::rename(&temp_restore, &path_restore).is_ok()
+                    || (std::fs::copy(&temp_restore, &path_restore).is_ok()
+                        && { let _ = std::fs::remove_file(&temp_restore); true });
+                if restored {
+                    win.imp().soundboard_page.add_sound_from_path(path_restore.clone());
                 }
             }
         ));
 
         let temp_for_dismiss = temp_path.clone();
         toast.connect_dismissed(move |_| {
-            // If temp file still exists the undo button was not used — delete permanently
             if temp_for_dismiss.exists() {
                 let _ = std::fs::remove_file(&temp_for_dismiss);
             }

@@ -17,12 +17,23 @@ struct PlayingSound {
     total_duration: Option<Duration>,
 }
 
+struct QueuedSound {
+    name: String,
+    path: PathBuf,
+    total_secs: Option<u32>,
+}
+
 pub struct AudioEngine {
     _stream: OutputStream,
     stream_handle: OutputStreamHandle,
     playing: Vec<PlayingSound>,
-    queue: Vec<(String, PathBuf)>,
+    queue: Vec<QueuedSound>,
     polyphonic: bool,
+}
+
+fn probe_duration(path: &Path) -> Option<Duration> {
+    let file = std::fs::File::open(path).ok()?;
+    Decoder::new(BufReader::new(file)).ok()?.total_duration()
 }
 
 impl AudioEngine {
@@ -42,14 +53,32 @@ impl AudioEngine {
         self.polyphonic = v;
     }
 
-    /// Start or queue a sound depending on polyphonic mode.
+    pub fn polyphonic(&self) -> bool {
+        self.polyphonic
+    }
+
     pub fn play(&mut self, path: &Path, name: &str) -> Result<()> {
         if self.polyphonic || self.playing.is_empty() {
             self.start_sound(path, name)?;
         } else {
-            self.queue.push((name.to_string(), path.to_path_buf()));
+            let total_secs = probe_duration(path).map(|d| d.as_secs() as u32);
+            self.queue.push(QueuedSound {
+                name: name.to_string(),
+                path: path.to_path_buf(),
+                total_secs,
+            });
         }
         Ok(())
+    }
+
+    /// Always append to queue regardless of polyphonic mode.
+    pub fn cue(&mut self, path: &Path, name: &str) {
+        let total_secs = probe_duration(path).map(|d| d.as_secs() as u32);
+        self.queue.push(QueuedSound {
+            name: name.to_string(),
+            path: path.to_path_buf(),
+            total_secs,
+        });
     }
 
     fn start_sound(&mut self, path: &Path, name: &str) -> Result<()> {
@@ -69,18 +98,16 @@ impl AudioEngine {
         Ok(())
     }
 
-    /// Call every timer tick. Cleans up finished sounds, advances queue when all done.
-    /// Returns (playing sounds info, queue names).
-    pub fn tick(&mut self) -> (Vec<SoundInfo>, Vec<String>) {
-        // Remove finished sounds
+    /// Call every timer tick. Returns (playing_info, queue_info).
+    /// queue_info entries: (name, total_duration_secs)
+    pub fn tick(&mut self) -> (Vec<SoundInfo>, Vec<(String, Option<u32>)>) {
         self.playing.retain(|s| !s.sink.empty());
 
-        // If nothing is playing, start next from queue
         if self.playing.is_empty() {
             while !self.queue.is_empty() {
-                let (name, path) = self.queue.remove(0);
-                if let Err(e) = self.start_sound(&path, &name) {
-                    log::error!("Failed to start queued sound '{}': {}", name, e);
+                let next = self.queue.remove(0);
+                if let Err(e) = self.start_sound(&next.path, &next.name) {
+                    log::error!("Failed to start queued sound '{}': {}", next.name, e);
                     continue;
                 }
                 break;
@@ -102,9 +129,11 @@ impl AudioEngine {
             }
         }).collect();
 
-        let queue_names: Vec<String> = self.queue.iter().map(|(n, _)| n.clone()).collect();
+        let queue_info: Vec<(String, Option<u32>)> = self.queue.iter()
+            .map(|q| (q.name.clone(), q.total_secs))
+            .collect();
 
-        (playing_info, queue_names)
+        (playing_info, queue_info)
     }
 
     pub fn stop_all(&mut self) {
@@ -128,15 +157,13 @@ impl AudioEngine {
         }
     }
 
-    pub fn polyphonic(&self) -> bool {
-        self.polyphonic
-    }
-
+    /// Stop all playing sounds then start the next item from the queue.
     pub fn skip_queue(&mut self) {
+        self.playing.clear();
         if !self.queue.is_empty() {
-            let (name, path) = self.queue.remove(0);
-            if let Err(e) = self.start_sound(&path, &name) {
-                log::error!("Skip failed to start '{}': {}", name, e);
+            let next = self.queue.remove(0);
+            if let Err(e) = self.start_sound(&next.path, &next.name) {
+                log::error!("Skip failed to start '{}': {}", next.name, e);
             }
         }
     }

@@ -21,6 +21,21 @@
     color: #57e389;
 }
 
+/* Aggregate time display in LCD panel */
+.lcd-grand-total {
+    font-family: "Noto Sans Mono", "Source Code Pro", monospace;
+    font-size: 2.0rem;
+    font-weight: bold;
+    color: #57e389;
+    letter-spacing: 0.04em;
+}
+
+.lcd-until-next {
+    font-family: "Noto Sans Mono", "Source Code Pro", monospace;
+    font-size: 1.1rem;
+    color: #3a8f5e;
+}
+
 /* Coming Soon overlay on the Effects tab */
 .coming-soon-overlay {
     background-color: alpha(#000000, 0.62);

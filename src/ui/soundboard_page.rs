@@ -3,6 +3,7 @@ use gtk::glib;
 use gtk::prelude::*;
 use std::cell::RefCell;
 use std::path::PathBuf;
+use std::rc::Rc;
 
 use crate::audio::engine::SoundInfo;
 use crate::ui::ResonateSoundTile;
@@ -12,6 +13,8 @@ pub struct SoundEntry {
     pub name: String,
     pub path: PathBuf,
     pub tile: ResonateSoundTile,
+    /// Shared with all tile callbacks so rename keeps them in sync.
+    pub shared_path: Rc<RefCell<PathBuf>>,
 }
 
 mod imp {
@@ -35,6 +38,10 @@ mod imp {
         #[template_child]
         pub playback_progress: TemplateChild<gtk::ProgressBar>,
         #[template_child]
+        pub total_time_label: TemplateChild<gtk::Label>,
+        #[template_child]
+        pub until_next_label: TemplateChild<gtk::Label>,
+        #[template_child]
         pub master_volume_scale: TemplateChild<gtk::Scale>,
 
         pub sounds: RefCell<Vec<SoundEntry>>,
@@ -54,6 +61,8 @@ mod imp {
                 stop_all_button: Default::default(),
                 now_playing_label: Default::default(),
                 playback_progress: Default::default(),
+                total_time_label: Default::default(),
+                until_next_label: Default::default(),
                 master_volume_scale: Default::default(),
                 sounds: RefCell::new(Vec::new()),
                 play_fn: RefCell::new(None),
@@ -132,7 +141,11 @@ impl ResonateSoundboardPage {
         });
     }
 
-    /// Add a sound and wire its tile buttons.
+    pub fn set_play_pause_sensitive(&self, sensitive: bool) {
+        self.imp().play_pause_button.set_sensitive(sensitive);
+    }
+
+    /// Add a sound and wire its tile buttons. Paths are shared via Rc so rename stays in sync.
     pub fn add_sound_from_path(&self, path: PathBuf) -> bool {
         let name = path
             .file_stem()
@@ -143,50 +156,52 @@ impl ResonateSoundboardPage {
         let n = self.imp().sound_grid.observe_children().n_items() + 1;
         let tile = ResonateSoundTile::new(n, &name);
 
+        let shared_path = Rc::new(RefCell::new(path.clone()));
+
         // Play button
-        let path_p = path.clone();
+        let sp_play = shared_path.clone();
         tile.connect_play(glib::clone!(
             #[weak(rename_to = page)]
             self,
             move || {
                 if let Some(f) = page.imp().play_fn.borrow().as_ref() {
-                    f(path_p.clone());
+                    f(sp_play.borrow().clone());
                 }
             }
         ));
 
         // Cue button
-        let path_c = path.clone();
+        let sp_cue = shared_path.clone();
         tile.connect_cue(glib::clone!(
             #[weak(rename_to = page)]
             self,
             move || {
                 if let Some(f) = page.imp().cue_fn.borrow().as_ref() {
-                    f(path_c.clone());
+                    f(sp_cue.borrow().clone());
                 }
             }
         ));
 
         // Rename menu item
-        let path_r = path.clone();
+        let sp_rename = shared_path.clone();
         tile.connect_rename(glib::clone!(
             #[weak(rename_to = page)]
             self,
             move || {
                 if let Some(f) = page.imp().rename_fn.borrow().as_ref() {
-                    f(path_r.clone());
+                    f(sp_rename.borrow().clone());
                 }
             }
         ));
 
         // Remove menu item
-        let path_x = path.clone();
+        let sp_remove = shared_path.clone();
         tile.connect_remove(glib::clone!(
             #[weak(rename_to = page)]
             self,
             move || {
                 if let Some(f) = page.imp().remove_fn.borrow().as_ref() {
-                    f(path_x.clone());
+                    f(sp_remove.borrow().clone());
                 }
             }
         ));
@@ -195,18 +210,20 @@ impl ResonateSoundboardPage {
             name,
             path,
             tile: tile.clone(),
+            shared_path,
         });
         self.imp().sound_grid.insert(&tile, -1);
         self.update_empty_state();
         true
     }
 
-    /// Update the tile label and path after a rename.
+    /// Update tile label and path (and shared path used by callbacks) after a rename.
     pub fn rename_sound_by_path(&self, old_path: &PathBuf, new_name: String, new_path: PathBuf) {
         let mut sounds = self.imp().sounds.borrow_mut();
         if let Some(entry) = sounds.iter_mut().find(|s| &s.path == old_path) {
             entry.tile.set_name(&new_name);
             entry.name = new_name;
+            *entry.shared_path.borrow_mut() = new_path.clone();
             entry.path = new_path;
         }
     }
@@ -218,7 +235,6 @@ impl ResonateSoundboardPage {
             let idx = sounds.iter().position(|s| &s.path == path)?;
             sounds.remove(idx)
         };
-        // Find and remove the GtkFlowBoxChild containing this tile
         let mut i = 0;
         loop {
             let Some(fbc) = self.imp().sound_grid.child_at_index(i) else {
@@ -238,16 +254,31 @@ impl ResonateSoundboardPage {
         Some(entry)
     }
 
-    /// Update the full-width LCD panel with current play state.
-    pub fn update_playback_display(&self, playing: &[SoundInfo], queue: &[String]) {
+    /// Update the LCD panel with current play state and time totals.
+    pub fn update_playback_display(&self, playing: &[SoundInfo], queue: &[(String, Option<u32>)]) {
         let markup = format_playback_markup(playing, queue);
         self.imp().now_playing_label.set_markup(&markup);
 
-        let fraction = playing
-            .first()
-            .map(|s| s.fraction)
-            .unwrap_or(0.0);
+        let fraction = playing.first().map(|s| s.fraction).unwrap_or(0.0);
         self.imp().playback_progress.set_fraction(fraction);
+
+        // Time totals
+        let until_next_secs: u32 = playing.iter().filter_map(|s| s.remaining_secs).sum();
+        let queue_secs: u32 = queue.iter().filter_map(|(_, s)| *s).sum();
+        let grand_total_secs = until_next_secs + queue_secs;
+
+        if playing.is_empty() && queue.is_empty() {
+            self.imp().total_time_label.set_label("—:——");
+            self.imp().until_next_label.set_visible(false);
+        } else {
+            self.imp().total_time_label.set_label(&fmt_time(grand_total_secs));
+            if !queue.is_empty() {
+                self.imp().until_next_label.set_label(&fmt_time(until_next_secs));
+                self.imp().until_next_label.set_visible(true);
+            } else {
+                self.imp().until_next_label.set_visible(false);
+            }
+        }
     }
 
     fn update_empty_state(&self) {
@@ -262,6 +293,10 @@ impl Default for ResonateSoundboardPage {
     fn default() -> Self {
         Self::new()
     }
+}
+
+fn fmt_time(secs: u32) -> String {
+    format!("{:02}:{:02}", secs / 60, secs % 60)
 }
 
 fn escape_markup(s: &str) -> String {
@@ -280,13 +315,13 @@ fn truncate(s: &str, max: usize) -> String {
     }
 }
 
-fn format_playback_markup(playing: &[SoundInfo], queue: &[String]) -> String {
+fn format_playback_markup(playing: &[SoundInfo], queue: &[(String, Option<u32>)]) -> String {
     if playing.is_empty() && queue.is_empty() {
         return "<span foreground='#555555'>Nothing playing</span>".to_string();
     }
 
     const NAME_MAX: usize = 30;
-    const TIME_W: usize = 6; // "-59:59"
+    const TIME_W: usize = 6;
     const PAD: usize = 2;
 
     let mut lines: Vec<String> = Vec::new();
@@ -308,7 +343,7 @@ fn format_playback_markup(playing: &[SoundInfo], queue: &[String]) -> String {
     if !queue.is_empty() {
         let sep = "─".repeat(NAME_MAX + TIME_W + PAD + 2);
         lines.push(format!("<span foreground='#2e2e2e'>{}</span>", sep));
-        for (i, name) in queue.iter().enumerate().take(5) {
+        for (i, (name, _)) in queue.iter().enumerate().take(5) {
             let n = escape_markup(&truncate(name, NAME_MAX + TIME_W + PAD));
             lines.push(format!("<span foreground='#666666'>⏭ {}</span>", n));
             if i == 4 && queue.len() > 5 {
