@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<gresources>
+  <gresource prefix="/io/github/resonate">
+    <file>style.css</file>
+    <file preprocess="xml-stripblanks">ui/window.ui</file>
+    <file preprocess="xml-stripblanks">ui/soundboard_page.ui</file>
+    <file preprocess="xml-stripblanks">ui/effects_page.ui</file>
+    <file preprocess="xml-stripblanks">ui/settings_page.ui</file>
+    <file preprocess="xml-stripblanks">ui/sound_tile.ui</file>
+    <file alias="icons/scalable/apps/io.github.resonate.svg">../data/icons/io.github.resonate.svg</file>
+  </gresource>
+</gresources>

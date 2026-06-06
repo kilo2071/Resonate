@@ -1,0 +1,105 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<interface>
+  <requires lib="gtk" version="4.0"/>
+  <requires lib="libadwaita" version="1.0"/>
+  <template class="ResonateSettingsPage" parent="AdwPreferencesPage">
+    <property name="title" translatable="yes">Settings</property>
+
+    <!-- Audio Input -->
+    <child>
+      <object class="AdwPreferencesGroup">
+        <property name="title" translatable="yes">Audio Input</property>
+        <property name="description" translatable="yes">Microphone source for the effects chain</property>
+        <child>
+          <object class="AdwComboRow" id="input_device_row">
+            <property name="title" translatable="yes">Input Device</property>
+          </object>
+        </child>
+      </object>
+    </child>
+
+    <!-- Monitor Output -->
+    <child>
+      <object class="AdwPreferencesGroup">
+        <property name="title" translatable="yes">Monitor Output</property>
+        <property name="description" translatable="yes">Hear soundboard playback on a separate output device</property>
+        <child>
+          <object class="AdwComboRow" id="monitor_device_row">
+            <property name="title" translatable="yes">Monitor Device</property>
+          </object>
+        </child>
+        <child>
+          <object class="AdwSwitchRow" id="monitor_enabled_row">
+            <property name="title" translatable="yes">Enable Monitor</property>
+            <property name="subtitle" translatable="yes">Route soundboard audio to the monitor device</property>
+            <property name="active">false</property>
+          </object>
+        </child>
+        <child>
+          <object class="AdwSwitchRow" id="monitor_mic_effects_row">
+            <property name="title" translatable="yes">Monitor Mic Effects</property>
+            <property name="subtitle" translatable="yes">Also route the processed microphone signal to the monitor</property>
+            <property name="active">false</property>
+          </object>
+        </child>
+      </object>
+    </child>
+
+    <!-- Playback -->
+    <child>
+      <object class="AdwPreferencesGroup">
+        <property name="title" translatable="yes">Playback</property>
+        <child>
+          <object class="AdwSwitchRow" id="polyphonic_row">
+            <property name="title" translatable="yes">Play Multiple Sounds</property>
+            <property name="subtitle" translatable="yes">Allow more than one sound to play at the same time</property>
+            <property name="active">true</property>
+          </object>
+        </child>
+        <child>
+          <object class="AdwSwitchRow" id="stop_on_play_row">
+            <property name="title" translatable="yes">Stop on Second Press</property>
+            <property name="subtitle" translatable="yes">Pressing play on an already-playing sound stops it</property>
+            <property name="active">true</property>
+          </object>
+        </child>
+        <child>
+          <object class="AdwSpinRow" id="default_volume_row">
+            <property name="title" translatable="yes">Default Volume</property>
+            <property name="subtitle" translatable="yes">Starting volume for newly added sounds (0–100)</property>
+            <property name="adjustment">
+              <object class="GtkAdjustment">
+                <property name="lower">0</property>
+                <property name="upper">100</property>
+                <property name="value">100</property>
+                <property name="step-increment">1</property>
+                <property name="page-increment">10</property>
+              </object>
+            </property>
+          </object>
+        </child>
+      </object>
+    </child>
+
+    <!-- Virtual Device -->
+    <child>
+      <object class="AdwPreferencesGroup">
+        <property name="title" translatable="yes">Virtual Device</property>
+        <property name="description" translatable="yes">The PipeWire virtual microphone other apps see</property>
+        <child>
+          <object class="AdwEntryRow" id="virtual_device_name_row">
+            <property name="title" translatable="yes">Device Name</property>
+            <property name="text">Resonate Microphone</property>
+          </object>
+        </child>
+        <child>
+          <object class="AdwSwitchRow" id="autostart_virtual_device_row">
+            <property name="title" translatable="yes">Start on Launch</property>
+            <property name="subtitle" translatable="yes">Create the virtual device automatically when Resonate opens</property>
+            <property name="active">true</property>
+          </object>
+        </child>
+      </object>
+    </child>
+  </template>
+</interface>

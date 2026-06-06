@@ -1,0 +1,170 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<interface>
+  <requires lib="gtk" version="4.0"/>
+  <requires lib="libadwaita" version="1.0"/>
+  <template class="ResonateSoundboardPage" parent="GtkBox">
+    <property name="orientation">vertical</property>
+    <!-- Sound grid -->
+    <child>
+      <object class="GtkScrolledWindow">
+        <property name="vexpand">true</property>
+        <child>
+          <object class="GtkFlowBox" id="sound_grid">
+            <property name="row-spacing">0</property>
+            <property name="column-spacing">0</property>
+            <property name="margin-top">6</property>
+            <property name="margin-bottom">6</property>
+            <property name="margin-start">6</property>
+            <property name="margin-end">6</property>
+            <property name="min-children-per-line">2</property>
+            <property name="max-children-per-line">10</property>
+            <property name="selection-mode">single</property>
+            <property name="valign">start</property>
+            <property name="halign">fill</property>
+            <property name="homogeneous">true</property>
+          </object>
+        </child>
+      </object>
+    </child>
+    <!-- Hard separator before playback bar -->
+    <child>
+      <object class="GtkSeparator">
+        <property name="orientation">horizontal</property>
+      </object>
+    </child>
+    <!-- Playback bar -->
+    <child>
+      <object class="GtkBox">
+        <property name="orientation">horizontal</property>
+        <property name="spacing">16</property>
+        <property name="margin-top">14</property>
+        <property name="margin-bottom">14</property>
+        <property name="margin-start">16</property>
+        <property name="margin-end">16</property>
+        <!-- Transport controls -->
+        <child>
+          <object class="GtkBox">
+            <property name="orientation">horizontal</property>
+            <property name="spacing">4</property>
+            <property name="valign">center</property>
+            <child>
+              <object class="GtkButton" id="play_pause_button">
+                <property name="icon-name">media-playback-start-symbolic</property>
+                <property name="tooltip-text" translatable="yes">Play selected sound</property>
+                <style>
+                  <class name="circular"/>
+                  <class name="suggested-action"/>
+                </style>
+              </object>
+            </child>
+            <child>
+              <object class="GtkButton" id="skip_button">
+                <property name="icon-name">media-skip-forward-symbolic</property>
+                <property name="tooltip-text" translatable="yes">Skip to next queued sound</property>
+                <style>
+                  <class name="circular"/>
+                  <class name="flat"/>
+                </style>
+              </object>
+            </child>
+            <child>
+              <object class="GtkButton" id="stop_all_button">
+                <property name="icon-name">media-playback-stop-symbolic</property>
+                <property name="tooltip-text" translatable="yes">Stop all sounds</property>
+                <style>
+                  <class name="circular"/>
+                  <class name="destructive-action"/>
+                </style>
+              </object>
+            </child>
+          </object>
+        </child>
+        <child>
+          <object class="GtkSeparator">
+            <property name="orientation">vertical</property>
+          </object>
+        </child>
+        <!-- Now playing: name + time + progress -->
+        <child>
+          <object class="GtkBox">
+            <property name="orientation">vertical</property>
+            <property name="spacing">5</property>
+            <property name="hexpand">true</property>
+            <property name="valign">center</property>
+            <child>
+              <object class="GtkBox">
+                <property name="orientation">horizontal</property>
+                <child>
+                  <object class="GtkLabel" id="now_playing_label">
+                    <property name="label" translatable="yes">Nothing playing</property>
+                    <property name="xalign">0</property>
+                    <property name="hexpand">true</property>
+                    <property name="ellipsize">end</property>
+                    <style>
+                      <class name="title-4"/>
+                    </style>
+                  </object>
+                </child>
+                <child>
+                  <!-- LCD-style timer panel -->
+                  <object class="GtkBox">
+                    <property name="valign">center</property>
+                    <property name="margin-start">12</property>
+                    <style>
+                      <class name="lcd-panel"/>
+                    </style>
+                    <child>
+                      <object class="GtkLabel" id="time_remaining_label">
+                        <property name="label">—:——</property>
+                        <style>
+                          <class name="lcd-timer"/>
+                        </style>
+                      </object>
+                    </child>
+                  </object>
+                </child>
+              </object>
+            </child>
+            <child>
+              <object class="GtkProgressBar" id="playback_progress">
+                <property name="fraction">0</property>
+              </object>
+            </child>
+          </object>
+        </child>
+        <child>
+          <object class="GtkSeparator">
+            <property name="orientation">vertical</property>
+          </object>
+        </child>
+        <!-- Master volume -->
+        <child>
+          <object class="GtkBox">
+            <property name="orientation">horizontal</property>
+            <property name="spacing">8</property>
+            <property name="valign">center</property>
+            <child>
+              <object class="GtkImage">
+                <property name="icon-name">audio-volume-high-symbolic</property>
+              </object>
+            </child>
+            <child>
+              <object class="GtkScale" id="master_volume_scale">
+                <property name="width-request">140</property>
+                <property name="draw-value">false</property>
+                <property name="adjustment">
+                  <object class="GtkAdjustment">
+                    <property name="lower">0</property>
+                    <property name="upper">100</property>
+                    <property name="value">100</property>
+                    <property name="step-increment">1</property>
+                  </object>
+                </property>
+              </object>
+            </child>
+          </object>
+        </child>
+      </object>
+    </child>
+  </template>
+</interface>

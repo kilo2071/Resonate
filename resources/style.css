@@ -1,0 +1,15 @@
+/* LCD-style countdown panel in the soundboard playback bar */
+.lcd-panel {
+    background-color: #1a1a1a;
+    border-radius: 8px;
+    padding: 4px 12px;
+    border: 1px solid #333333;
+}
+
+.lcd-timer {
+    font-family: "Noto Sans Mono", "Source Code Pro", monospace;
+    font-size: 1.45rem;
+    font-weight: bold;
+    color: #57e389;
+    letter-spacing: 0.04em;
+}
