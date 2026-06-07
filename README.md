@@ -1,8 +1,8 @@
 # Resonate
 
-There wasn't a nice native soundboard app for GNOME, so I vibecoded one over a couple of days with [Claude](https://www.anthropic.com/claude-code). It turned into a GTK 4 + Libadwaita app in Rust with polyphonic playback, a sequential queue, a real-time LCD panel, **a PipeWire virtual microphone, and a real-time mic effects chain (built-in + LV2 plugins)**.
+There wasn't a nice native soundboard app for GNOME, so I vibecoded one over a couple of days with [Claude](https://www.anthropic.com/claude-code). It turned into a GTK 4 + Libadwaita app written in Rust with polyphonic playback, a sequential queue, **a PipeWire virtual microphone, and a real-time mic effects chain (built-in + LV2 plugins)**.
 
-> ⚠️ **Use at your own risk.** This is a hobby project that is largely AI-generated and lightly tested. It pokes at your PipeWire graph and sets your default input device, so expect rough edges — back up nothing important and don't run it in the middle of an important call. No warranty, etc. etc.
+> ⚠️ **Use at your own risk.** This is a hobby project that is largely AI-generated and lightly tested. It pokes at your PipeWire graph and sets your default input device, so expect rough edges, don't run it in the middle of an important call. No warranty, etc. etc.
 
 ![Platform](https://img.shields.io/badge/platform-Fedora%2044%20%2F%20GNOME%2050-blue)
 ![Language](https://img.shields.io/badge/language-Rust-orange)
