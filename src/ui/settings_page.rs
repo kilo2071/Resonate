@@ -24,6 +24,8 @@ mod imp {
         pub virtual_device_name_row: TemplateChild<adw::EntryRow>,
         #[template_child]
         pub autostart_virtual_device_row: TemplateChild<adw::SwitchRow>,
+        #[template_child]
+        pub start_on_login_row: TemplateChild<adw::SwitchRow>,
     }
 
     #[glib::object_subclass]

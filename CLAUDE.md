@@ -26,9 +26,10 @@ Config stored at: `~/.config/io.github.kilo2071.Resonate/config.json`
 ## Features
 
 ### Core
-- Soundboard: load and play audio samples, monitored through the system audio output
+- Soundboard: load and play audio samples (per-tile volume, polyphonic stacking + queue), monitored through the system default output
 - Virtual audio device: PipeWire virtual source so sounds and mic appear as one mic input to other apps
 - Plugin system: apply real-time effects to microphone input (built-in Noise Gate, Gain + any installed LV2 plugin)
+- Background mode: close-to-tray keeps effects running; SNI tray indicator + optional start-on-login (see "Lifecycle / background mode")
 
 ### Plugin Architecture
 - Built-in plugins implement `ResonatePlugin` trait in `src/plugins/builtin/`
@@ -52,21 +53,25 @@ anyhow = "1"
 log = "0.4"
 env_logger = "0.11"
 rodio = { version = "0.20", default-features = false, features = ["symphonia-all"] }
+ksni = "0.2"          # StatusNotifierItem tray (0.2 = libdbus backend, no tokio)
 
 [build-dependencies]
 glib-build-tools = "0.20"
 ```
 
-No `tokio`, no `ringbuf`.
+No `tokio`, no `ringbuf`. `ksni` is pinned to **0.2** on purpose: 0.3+ pulls in
+`zbus` + `tokio`. 0.2 uses the blocking `dbus` crate (links system `libdbus`),
+which keeps the no-async-runtime constraint.
 
 ## Project Structure
 
 ```
 resonate/
 ├── src/
-│   ├── main.rs                     # app entry, GApplication setup
-│   ├── application.rs              # AdwApplication subclass
-│   ├── window.rs                   # AdwApplicationWindow + wiring
+│   ├── main.rs                     # app entry, GApplication setup; APP_ID, START_HIDDEN, --hidden
+│   ├── application.rs              # AdwApplication subclass; single-instance activate, --hidden
+│   ├── window.rs                   # AdwApplicationWindow + wiring; close-to-background, tray poll, autostart
+│   ├── tray.rs                     # StatusNotifierItem tray (ksni); TrayCmd channel → GTK
 │   ├── config.rs                   # Config, EffectEntry (serde_json)
 │   ├── audio/
 │   │   ├── mod.rs
@@ -95,11 +100,37 @@ resonate/
 │       ├── soundboard_page.ui
 │       ├── settings_page.ui
 │       └── effects_page.ui
+├── data/
+│   ├── io.github.kilo2071.Resonate.desktop   # desktop entry (Exec=resonate)
+│   └── icons/io.github.kilo2071.Resonate.svg # app icon (also bundled in gresource)
+├── packaging/
+│   └── resonate.spec               # local RPM build
 ├── Cargo.toml
 └── build.rs                        # gresource compilation
 ```
 
 GResource paths use prefix `/io/github/kilo2071/Resonate/`.
+
+## Lifecycle / background mode
+
+- `APP_ID` (`io.github.kilo2071.Resonate`) is the GApplication id **and** the
+  basename of the installed `.desktop` file **and** the icon name — GNOME matches
+  a running window to its desktop entry by this id, so all three must agree or the
+  Overview/Alt-Tab show a generic name/icon.
+- **Close = hide to background.** The window's `close-request` handler hides the
+  window (returns `Propagation::Stop`) instead of destroying it, so the PipeWire
+  thread and effects chain keep running. Real teardown happens only via the tray
+  **Quit** (`do_quit` sets `force_quit`, drops `virtual_device`, `app.quit()`),
+  which lets the next `close-request` proceed.
+- **Tray** (`tray.rs`): `ksni::TrayService` runs on its own thread; clicks are
+  sent as `TrayCmd` over an `mpsc` channel and drained by a 150 ms glib timeout on
+  the main thread (no async runtime). Needs the GNOME "AppIndicator/KStatusNotifier"
+  extension to be visible.
+- **Autostart**: a Settings switch writes/removes
+  `~/.config/autostart/<APP_ID>.desktop` with `Exec=<exe> --hidden`. `--hidden`
+  sets `START_HIDDEN`, so `activate()` creates the window (effects start) but does
+  not present it. `activate()` is single-instance: re-launching raises the
+  existing window instead of opening a second one.
 
 ## Build & Run
 

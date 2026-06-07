@@ -110,5 +110,20 @@
         </child>
       </object>
     </child>
+
+    <!-- Startup -->
+    <child>
+      <object class="AdwPreferencesGroup">
+        <property name="title" translatable="yes">Startup</property>
+        <property name="description" translatable="yes">Run Resonate in the background to keep mic effects active</property>
+        <child>
+          <object class="AdwSwitchRow" id="start_on_login_row">
+            <property name="title" translatable="yes">Start on Login</property>
+            <property name="subtitle" translatable="yes">Launch hidden at login and keep the mic effects running in the background (closing the window hides it to the tray)</property>
+            <property name="active">false</property>
+          </object>
+        </child>
+      </object>
+    </child>
   </template>
 </interface>

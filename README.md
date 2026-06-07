@@ -24,6 +24,7 @@ A native GNOME soundboard with polyphonic playback, a sequential queue, a real-t
 - **Monitor Output** — hear the soundboard yourself on the system default output (toggle); monitor level is the slider on the soundboard bar
 - **Playback** — Play Multiple Sounds (polyphonic) and Default Volume for new tiles
 - **Virtual Device** — set the virtual mic's display name and whether it is created on launch
+- **Startup** — Start on Login (run hidden in the background and keep mic effects active)
 
 ### Virtual microphone
 - **PipeWire virtual mic** — Resonate exposes a "Resonate Microphone" source that other apps (Discord, OBS, browsers…) can select as an input
@@ -33,8 +34,13 @@ A native GNOME soundboard with polyphonic playback, a sequential queue, a real-t
 
 ### Mic effects
 - **Real-time effects chain** applied to the microphone: built-in **Noise Gate** and **Gain**, plus **any installed LV2 plugin** (hosted via [`livi`](https://github.com/wmedrano/livi))
-- **Add / remove / reorder-by-list** effects from the Effects page; parameter sliders are generated automatically from each plugin's controls
+- **Add / remove** effects from the Effects page; controls are generated automatically per plugin and rendered by type — sliders, switches (toggles) and dropdowns (enumerated choices)
 - Chain is persisted to `config.json` and re-applied on launch
+
+### Background mode (Easy Effects-style)
+- **Run in the background** — closing the window hides Resonate instead of quitting, so the mic effects keep processing
+- **Tray indicator** — a StatusNotifierItem with *Show Resonate* / *Quit* (on GNOME this needs the [AppIndicator and KStatusNotifierItem Support](https://extensions.gnome.org/extension/615/appindicator-support/) shell extension)
+- **Start on Login** — a Settings switch installs an autostart entry that launches Resonate hidden, so your processed mic is available right after login
 
 ## Requirements
 
@@ -53,7 +59,7 @@ Supported audio formats: WAV, MP3, FLAC, OGG, AAC, M4A, Opus, WMA.
 ### Build dependencies (Fedora)
 
 ```bash
-sudo dnf install lilv-devel lv2-devel serd-devel sord-devel sratom-devel
+sudo dnf install lilv-devel lv2-devel serd-devel sord-devel sratom-devel dbus-devel
 ```
 
 ## Build & Run
@@ -65,7 +71,31 @@ cargo run
 
 # With verbose logging
 RUST_LOG=resonate=debug cargo run
+
+# Launch hidden in the background (used by the autostart entry)
+cargo run -- --hidden
 ```
+
+## Build an RPM (Fedora)
+
+A spec for a local, installable package lives in `packaging/resonate.spec`:
+
+```bash
+sudo dnf install rpm-build rpmdevtools
+rpmdev-setuptree
+
+VERSION=$(awk -F'"' '/^version/{print $2; exit}' Cargo.toml)
+git archive --format=tar.gz --prefix=resonate-$VERSION/ \
+  -o ~/rpmbuild/SOURCES/resonate-$VERSION.tar.gz HEAD
+rpmbuild -bb packaging/resonate.spec
+
+sudo dnf install ~/rpmbuild/RPMS/*/resonate-$VERSION-*.rpm
+```
+
+The package installs the binary to `/usr/bin/resonate` and the desktop entry +
+icon under `/usr/share`, and softly recommends `lsp-plugins-lv2` for a ready-made
+set of LV2 effects. (The spec defaults `License` to `GPL-3.0-or-later` — adjust
+it to the project's actual license.)
 
 ## Installing LV2 effect plugins
 

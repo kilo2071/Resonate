@@ -2,7 +2,7 @@ use adw::prelude::*;
 use adw::subclass::prelude::*;
 use gtk::gio;
 use gtk::glib;
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::path::PathBuf;
 
 use crate::audio::AudioEngine;
@@ -37,6 +37,8 @@ mod imp {
 
         pub config: RefCell<Config>,
         pub audio_engine: RefCell<Option<AudioEngine>>,
+        /// True once the user chose Quit (vs. just closing → hide to background).
+        pub force_quit: Cell<bool>,
     }
 
     impl Default for ResonateWindow {
@@ -49,6 +51,7 @@ mod imp {
                 settings_page: Default::default(),
                 config: RefCell::new(Config::load()),
                 audio_engine: RefCell::new(None),
+                force_quit: Cell::new(false),
             }
         }
     }
@@ -136,20 +139,52 @@ mod imp {
             win.sync_settings_ui();
             win.scan_sounds_folder();
 
-            // On close, stop our PipeWire thread (drops the bridge + mic streams).
-            // The offline mic pass-through is provided by the drop-in at next login.
+            // Closing the window hides it to the background so the mic effects
+            // keep running (this is what makes Resonate an Easy Effects-style
+            // background processor). Real teardown happens only on Quit, which
+            // sets `force_quit` and drops the PipeWire thread (bridge + streams).
             win.connect_close_request(glib::clone!(
                 #[weak(rename_to = w)]
                 win,
                 #[upgrade_or]
                 glib::Propagation::Proceed,
                 move |_| {
-                    if let Some(e) = w.imp().audio_engine.borrow_mut().as_mut() {
-                        e.virtual_device = None;
+                    if w.imp().force_quit.get() {
+                        if let Some(e) = w.imp().audio_engine.borrow_mut().as_mut() {
+                            e.virtual_device = None;
+                        }
+                        glib::Propagation::Proceed
+                    } else {
+                        w.set_visible(false);
+                        glib::Propagation::Stop
                     }
-                    glib::Propagation::Proceed
                 }
             ));
+
+            // Tray indicator (SNI). Tray clicks arrive off the GTK thread; poll
+            // the channel on the main loop and act here.
+            let rx = crate::tray::spawn();
+            glib::timeout_add_local(
+                std::time::Duration::from_millis(150),
+                glib::clone!(
+                    #[weak]
+                    win,
+                    #[upgrade_or]
+                    glib::ControlFlow::Break,
+                    move || {
+                        while let Ok(cmd) = rx.try_recv() {
+                            match cmd {
+                                crate::tray::TrayCmd::Show => {
+                                    win.set_visible(true);
+                                    win.present();
+                                }
+                                crate::tray::TrayCmd::Quit => win.do_quit(),
+                            }
+                        }
+                        glib::ControlFlow::Continue
+                    }
+                ),
+            );
         }
     }
 
@@ -755,6 +790,18 @@ impl ResonateWindow {
         }
     }
 
+    /// Tear down the background process and exit (from the tray "Quit" item).
+    fn do_quit(&self) {
+        self.imp().force_quit.set(true);
+        if let Some(e) = self.imp().audio_engine.borrow_mut().as_mut() {
+            e.virtual_device = None;
+        }
+        if let Some(app) = self.application() {
+            app.quit();
+        }
+        self.close();
+    }
+
     // ── Settings sync ────────────────────────────────────────────────────────
 
     fn sync_settings_ui(&self) {
@@ -832,6 +879,12 @@ impl ResonateWindow {
             }
         ));
 
+        // Start on login (background) — writes/removes the XDG autostart entry.
+        settings.imp().start_on_login_row.set_active(autostart_enabled());
+        settings.imp().start_on_login_row.connect_active_notify(|row| {
+            set_autostart(row.is_active());
+        });
+
         // Virtual device name — save on change
         settings.set_virtual_device_name(&config.virtual_device_name);
         settings.imp().virtual_device_name_row.connect_changed(glib::clone!(
@@ -870,6 +923,53 @@ impl ResonateWindow {
                 win.imp().config.borrow().save();
             }
         ));
+    }
+}
+
+// ── Autostart (XDG ~/.config/autostart) ──────────────────────────────────────
+
+/// Path of the per-user autostart entry.
+fn autostart_path() -> PathBuf {
+    gtk::glib::user_config_dir()
+        .join("autostart")
+        .join(format!("{}.desktop", crate::APP_ID))
+}
+
+/// Whether "start on login" is currently enabled.
+fn autostart_enabled() -> bool {
+    autostart_path().exists()
+}
+
+/// Write or remove the autostart entry. The entry launches with `--hidden` so
+/// the effects run in the background without popping the window on login.
+fn set_autostart(enabled: bool) {
+    let path = autostart_path();
+    if enabled {
+        let exe = std::env::current_exe()
+            .ok()
+            .and_then(|p| p.to_str().map(str::to_string))
+            .unwrap_or_else(|| "resonate".to_string());
+        let contents = format!(
+            "[Desktop Entry]\n\
+             Type=Application\n\
+             Name=Resonate\n\
+             Comment=Soundboard with a virtual microphone and real-time mic effects\n\
+             Exec={exe} --hidden\n\
+             Icon={id}\n\
+             Categories=AudioVideo;Audio;\n\
+             X-GNOME-Autostart-enabled=true\n",
+            id = crate::APP_ID,
+        );
+        if let Some(parent) = path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        if let Err(e) = std::fs::write(&path, contents) {
+            log::warn!("Could not write autostart entry: {e}");
+        }
+    } else if path.exists() {
+        if let Err(e) = std::fs::remove_file(&path) {
+            log::warn!("Could not remove autostart entry: {e}");
+        }
     }
 }
 

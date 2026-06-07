@@ -23,8 +23,22 @@ mod imp {
         fn activate(&self) {
             self.parent_activate();
             let app = self.obj();
+
+            // Single-instance: re-activation (or launching again) raises the
+            // existing window rather than creating a second one — this is also
+            // how the user reopens the app after it has hidden to background.
+            if let Some(win) = app.windows().into_iter().next() {
+                win.set_visible(true);
+                win.present();
+                return;
+            }
+
             let window = ResonateWindow::new(&*app);
-            window.present();
+            // When autostarted with --hidden, create the window (so the effects
+            // chain runs) but leave it hidden until the user opens it.
+            if !crate::START_HIDDEN.load(std::sync::atomic::Ordering::Relaxed) {
+                window.present();
+            }
         }
     }
 
@@ -41,7 +55,7 @@ glib::wrapper! {
 impl ResonateApplication {
     pub fn new() -> Self {
         glib::Object::builder()
-            .property("application-id", "io.github.kilo2071.Resonate")
+            .property("application-id", crate::APP_ID)
             .property("flags", gtk::gio::ApplicationFlags::empty())
             .build()
     }
