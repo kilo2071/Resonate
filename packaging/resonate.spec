@@ -14,7 +14,6 @@ Version:        0.1.0
 Release:        1%{?dist}
 Summary:        Soundboard with a virtual microphone and real-time mic effects
 
-# TODO: confirm the project license. Defaulted to GPL-3.0-or-later.
 License:        GPL-3.0-or-later
 URL:            https://github.com/kilo2071/Resonate
 Source0:        %{name}-%{version}.tar.gz
@@ -71,6 +70,8 @@ install -Dm0644 data/icons/%{appid}.svg \
 desktop-file-validate %{buildroot}%{_datadir}/applications/%{appid}.desktop
 
 %files
+%license LICENSE
+%doc README.md
 %{_bindir}/resonate
 %{_datadir}/applications/%{appid}.desktop
 %{_datadir}/icons/hicolor/scalable/apps/%{appid}.svg

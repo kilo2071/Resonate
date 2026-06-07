@@ -94,8 +94,7 @@ sudo dnf install ~/rpmbuild/RPMS/*/resonate-$VERSION-*.rpm
 
 The package installs the binary to `/usr/bin/resonate` and the desktop entry +
 icon under `/usr/share`, and softly recommends `lsp-plugins-lv2` for a ready-made
-set of LV2 effects. (The spec defaults `License` to `GPL-3.0-or-later` — adjust
-it to the project's actual license.)
+set of LV2 effects.
 
 ## Installing LV2 effect plugins
 
@@ -179,3 +178,7 @@ in-process mic FX path, and PipeWire gotchas).
 `io.github.kilo2071.Resonate`
 
 Config is stored at `~/.config/io.github.kilo2071.Resonate/config.json`.
+
+## License
+
+[GPL-3.0-or-later](LICENSE).
