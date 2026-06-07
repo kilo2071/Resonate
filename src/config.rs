@@ -40,10 +40,9 @@ pub struct Config {
     pub virtual_device_name: String,
     pub virtual_device_enabled: bool,
 
-    // Monitor output
+    // Monitor output (plays on the system default output device)
     pub monitor_enabled: bool,
     pub monitor_volume: f32,
-    pub monitor_device_name: String,
 
     // Microphone input
     pub input_device_name: String,
@@ -75,7 +74,6 @@ impl Default for Config {
             virtual_device_enabled: true,
             monitor_enabled: true,
             monitor_volume: 1.0,
-            monitor_device_name: String::new(),
             input_device_name: String::new(),
             mic_volume: 1.0,
             effects_chain: default_effects_chain(),

@@ -50,23 +50,11 @@
     <child>
       <object class="AdwPreferencesGroup">
         <property name="title" translatable="yes">Monitor Output</property>
-        <property name="description" translatable="yes">Hear soundboard playback on a separate output device</property>
-        <child>
-          <object class="AdwComboRow" id="monitor_device_row">
-            <property name="title" translatable="yes">Monitor Device</property>
-          </object>
-        </child>
+        <property name="description" translatable="yes">Hear soundboard playback yourself on the system default output</property>
         <child>
           <object class="AdwSwitchRow" id="monitor_enabled_row">
             <property name="title" translatable="yes">Enable Monitor</property>
-            <property name="subtitle" translatable="yes">Route soundboard audio to the monitor device</property>
-            <property name="active">false</property>
-          </object>
-        </child>
-        <child>
-          <object class="AdwSwitchRow" id="monitor_mic_effects_row">
-            <property name="title" translatable="yes">Monitor Mic Effects</property>
-            <property name="subtitle" translatable="yes">Also route the processed microphone signal to the monitor</property>
+            <property name="subtitle" translatable="yes">Play soundboard audio on your speakers/headphones</property>
             <property name="active">false</property>
           </object>
         </child>

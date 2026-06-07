@@ -15,11 +15,7 @@ mod imp {
         #[template_child]
         pub input_device_row: TemplateChild<adw::ComboRow>,
         #[template_child]
-        pub monitor_device_row: TemplateChild<adw::ComboRow>,
-        #[template_child]
         pub monitor_enabled_row: TemplateChild<adw::SwitchRow>,
-        #[template_child]
-        pub monitor_mic_effects_row: TemplateChild<adw::SwitchRow>,
         #[template_child]
         pub polyphonic_row: TemplateChild<adw::SwitchRow>,
         #[template_child]
@@ -86,17 +82,6 @@ impl ResonateSettingsPage {
         // Restore previously selected device
         let idx = names.iter().position(|n| n == saved).map(|i| i + 1).unwrap_or(0);
         self.imp().input_device_row.set_selected(idx as u32);
-    }
-
-    /// Populate monitor device combo and select the previously saved device.
-    pub fn set_monitor_device_list(&self, names: &[String], saved: &str) {
-        let all: Vec<&str> = std::iter::once("System Default")
-            .chain(names.iter().map(|s| s.as_str()))
-            .collect();
-        let list = gtk::StringList::new(&all);
-        self.imp().monitor_device_row.set_model(Some(&list));
-        let idx = names.iter().position(|n| n == saved).map(|i| i + 1).unwrap_or(0);
-        self.imp().monitor_device_row.set_selected(idx as u32);
     }
 
     pub fn set_virtual_device_name(&self, name: &str) {

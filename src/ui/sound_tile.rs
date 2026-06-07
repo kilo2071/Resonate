@@ -105,4 +105,14 @@ impl ResonateSoundTile {
     pub fn volume(&self) -> f64 {
         self.imp().volume_scale.value()
     }
+
+    /// Per-sound gain as a 0.0–1.0 linear factor (slider is 0–100).
+    pub fn volume_fraction(&self) -> f32 {
+        (self.imp().volume_scale.value() / 100.0) as f32
+    }
+
+    /// Set the slider position from a 0–100 percentage.
+    pub fn set_volume(&self, percent: f64) {
+        self.imp().volume_scale.set_value(percent.clamp(0.0, 100.0));
+    }
 }

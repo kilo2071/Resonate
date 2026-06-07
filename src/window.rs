@@ -84,6 +84,7 @@ mod imp {
                     engine.set_monitor_volume(cfg.monitor_volume);
                     engine.set_monitor_enabled(cfg.monitor_enabled);
                     engine.set_mic_volume(cfg.mic_volume);
+                    engine.set_stop_on_play(cfg.stop_on_play);
                     *self.audio_engine.borrow_mut() = Some(engine);
                 }
                 Err(e) => log::error!("Audio engine init failed: {}", e),
@@ -197,6 +198,7 @@ impl ResonateWindow {
         {
             let cfg = self.imp().config.borrow().clone();
             page.set_initial_volumes(cfg.mic_volume, cfg.monitor_volume);
+            page.set_default_volume(cfg.default_volume as f64);
         }
 
         // Mic / virtual device volume slider
@@ -229,10 +231,10 @@ impl ResonateWindow {
         page.set_play_callback(glib::clone!(
             #[weak(rename_to = win)]
             self,
-            move |path| {
+            move |path, volume| {
                 let name = path.file_stem().and_then(|s| s.to_str()).unwrap_or("Sound").to_string();
                 if let Some(engine) = win.imp().audio_engine.borrow_mut().as_mut() {
-                    if let Err(e) = engine.play(&path, &name) {
+                    if let Err(e) = engine.play(&path, &name, volume) {
                         log::error!("Playback failed: {}", e);
                     }
                 }
@@ -243,10 +245,10 @@ impl ResonateWindow {
         page.set_cue_callback(glib::clone!(
             #[weak(rename_to = win)]
             self,
-            move |path| {
+            move |path, volume| {
                 let name = path.file_stem().and_then(|s| s.to_str()).unwrap_or("Sound").to_string();
                 if let Some(engine) = win.imp().audio_engine.borrow_mut().as_mut() {
-                    engine.cue(&path, &name);
+                    engine.cue(&path, &name, volume);
                 }
             }
         ));
@@ -792,6 +794,34 @@ impl ResonateWindow {
             }
         ));
 
+        // Stop-on-second-press toggle → update engine
+        settings.imp().stop_on_play_row.set_active(config.stop_on_play);
+        settings.imp().stop_on_play_row.connect_active_notify(glib::clone!(
+            #[weak(rename_to = win)]
+            self,
+            move |row| {
+                let v = row.is_active();
+                win.imp().config.borrow_mut().stop_on_play = v;
+                win.imp().config.borrow().save();
+                if let Some(engine) = win.imp().audio_engine.borrow_mut().as_mut() {
+                    engine.set_stop_on_play(v);
+                }
+            }
+        ));
+
+        // Default volume for newly added tiles
+        settings.imp().default_volume_row.set_value(config.default_volume as f64);
+        settings.imp().default_volume_row.connect_value_notify(glib::clone!(
+            #[weak(rename_to = win)]
+            self,
+            move |row| {
+                let v = row.value();
+                win.imp().config.borrow_mut().default_volume = v as u32;
+                win.imp().config.borrow().save();
+                win.imp().soundboard_page.set_default_volume(v);
+            }
+        ));
+
         // Monitor enabled toggle
         settings.set_monitor_enabled(config.monitor_enabled);
         settings.imp().monitor_enabled_row.connect_active_notify(glib::clone!(
@@ -830,22 +860,17 @@ impl ResonateWindow {
             }
         ));
 
-        // Enumerate audio devices and populate combo rows
+        // Enumerate input devices and populate the mic combo. (Monitor playback
+        // uses the system default output, so there is no monitor-device picker.)
         let nodes = crate::audio::virtual_device::enumerate_nodes();
         let sources: Vec<String> = nodes
             .iter()
             .filter(|n| n.media_class.contains("Source") && !n.name.starts_with("resonate"))
             .map(|n| n.description.clone())
             .collect();
-        let sinks: Vec<String> = nodes
-            .iter()
-            .filter(|n| n.media_class.contains("Sink") && !n.name.starts_with("resonate"))
-            .map(|n| n.description.clone())
-            .collect();
         settings.set_input_device_list(&sources, &config.input_device_name);
-        settings.set_monitor_device_list(&sinks, &config.monitor_device_name);
 
-        // Save device selection when changed
+        // Save mic selection when changed
         let sources_for_cb = sources.clone();
         settings.imp().input_device_row.connect_selected_notify(glib::clone!(
             #[weak(rename_to = win)]
@@ -858,22 +883,6 @@ impl ResonateWindow {
                     sources_for_cb.get(idx - 1).cloned().unwrap_or_default()
                 };
                 win.imp().config.borrow_mut().input_device_name = name;
-                win.imp().config.borrow().save();
-            }
-        ));
-
-        let sinks_for_cb = sinks.clone();
-        settings.imp().monitor_device_row.connect_selected_notify(glib::clone!(
-            #[weak(rename_to = win)]
-            self,
-            move |row| {
-                let idx = row.selected() as usize;
-                let name = if idx == 0 {
-                    String::new()
-                } else {
-                    sinks_for_cb.get(idx - 1).cloned().unwrap_or_default()
-                };
-                win.imp().config.borrow_mut().monitor_device_name = name;
                 win.imp().config.borrow().save();
             }
         ));

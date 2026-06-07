@@ -82,12 +82,15 @@ struct PlayingSound {
     pcm: Option<Arc<Vec<f32>>>,
     pcm_slot: Option<PcmSlot>, // background-decode slot; cleared once PCM arrives
     pcm_pos: usize,
+    /// Per-sound linear gain (from the tile's volume slider), 0.0–1.0.
+    volume: f32,
 }
 
 struct QueuedSound {
     name: String,
     path: PathBuf,
     total_secs: Option<u32>,
+    volume: f32,
 }
 
 fn probe_duration(path: &Path) -> Option<Duration> {
@@ -111,6 +114,8 @@ pub struct AudioEngine {
 
     monitor_volume: f32,
     monitor_enabled: bool,
+    /// When true, pressing play on an already-playing sound stops it instead.
+    stop_on_play: bool,
 
     /// Mic effects chain, shared with the PipeWire mic capture thread.
     effects: SharedChain,
@@ -131,6 +136,7 @@ impl AudioEngine {
             last_tick: Instant::now(),
             monitor_volume: 1.0,
             monitor_enabled: true,
+            stop_on_play: true,
             effects: Arc::new(Mutex::new(PluginChain::new())),
         })
     }
@@ -170,19 +176,23 @@ impl AudioEngine {
 
     pub fn set_monitor_volume(&mut self, v: f32) {
         self.monitor_volume = v;
-        let effective = if self.monitor_enabled { v } else { 0.0 };
+        let base = if self.monitor_enabled { v } else { 0.0 };
         for ps in &self.playing {
-            ps.sink.set_volume(effective);
+            ps.sink.set_volume(base * ps.volume);
         }
     }
 
     pub fn set_monitor_enabled(&mut self, enabled: bool) {
         self.monitor_enabled = enabled;
-        let effective = if enabled { self.monitor_volume } else { 0.0 };
+        let base = if enabled { self.monitor_volume } else { 0.0 };
         for ps in &self.playing {
-            ps.sink.set_volume(effective);
+            ps.sink.set_volume(base * ps.volume);
         }
         // Virtual device is NOT muted here — it always mirrors soundboard + mic.
+    }
+
+    pub fn set_stop_on_play(&mut self, v: bool) {
+        self.stop_on_play = v;
     }
 
     pub fn set_mic_volume(&mut self, v: f32) {
@@ -207,30 +217,37 @@ impl AudioEngine {
 
     // ── Playback ──────────────────────────────────────────────────────────────
 
-    pub fn play(&mut self, path: &Path, name: &str) -> Result<()> {
+    pub fn play(&mut self, path: &Path, name: &str, volume: f32) -> Result<()> {
+        // "Stop on Second Press": pressing play on an already-playing sound stops it.
+        if self.stop_on_play && self.playing.iter().any(|s| s.path == path) {
+            self.playing.retain(|s| s.path != path);
+            return Ok(());
+        }
         if self.polyphonic || self.playing.is_empty() {
-            self.start_sound(path, name)?;
+            self.start_sound(path, name, volume)?;
         } else {
             let total_secs = probe_duration(path).map(|d| d.as_secs() as u32);
             self.queue.push(QueuedSound {
                 name: name.to_string(),
                 path: path.to_path_buf(),
                 total_secs,
+                volume,
             });
         }
         Ok(())
     }
 
-    pub fn cue(&mut self, path: &Path, name: &str) {
+    pub fn cue(&mut self, path: &Path, name: &str, volume: f32) {
         let total_secs = probe_duration(path).map(|d| d.as_secs() as u32);
         self.queue.push(QueuedSound {
             name: name.to_string(),
             path: path.to_path_buf(),
             total_secs,
+            volume,
         });
     }
 
-    fn start_sound(&mut self, path: &Path, name: &str) -> Result<()> {
+    fn start_sound(&mut self, path: &Path, name: &str, volume: f32) -> Result<()> {
         // Start rodio immediately — no blocking on this path.
         let file = std::fs::File::open(path)?;
         let source = Decoder::new(BufReader::new(file))
@@ -238,7 +255,8 @@ impl AudioEngine {
         let total = source.total_duration();
         let sink =
             Sink::try_new(&self.stream_handle).map_err(|e| anyhow::anyhow!("Sink: {}", e))?;
-        sink.set_volume(if self.monitor_enabled { self.monitor_volume } else { 0.0 });
+        let base = if self.monitor_enabled { self.monitor_volume } else { 0.0 };
+        sink.set_volume(base * volume);
         sink.append(source);
 
         // PCM for virtual mic: serve from cache or decode in background.
@@ -274,6 +292,7 @@ impl AudioEngine {
             pcm,
             pcm_slot,
             pcm_pos: 0,
+            volume,
         });
         Ok(())
     }
@@ -286,7 +305,7 @@ impl AudioEngine {
         if self.playing.is_empty() {
             while !self.queue.is_empty() {
                 let next = self.queue.remove(0);
-                if let Err(e) = self.start_sound(&next.path, &next.name) {
+                if let Err(e) = self.start_sound(&next.path, &next.name, next.volume) {
                     log::error!("Failed to start queued '{}': {}", next.name, e);
                     continue;
                 }
@@ -334,7 +353,7 @@ impl AudioEngine {
                         let end = (ps.pcm_pos + n).min(pcm.len());
                         let avail = end.saturating_sub(ps.pcm_pos);
                         for i in 0..avail {
-                            mix[i] = (mix[i] + pcm[ps.pcm_pos + i]).clamp(-1.0, 1.0);
+                            mix[i] = (mix[i] + pcm[ps.pcm_pos + i] * ps.volume).clamp(-1.0, 1.0);
                         }
                         ps.pcm_pos = end;
                     }
@@ -415,7 +434,7 @@ impl AudioEngine {
         self.playing.clear();
         if !self.queue.is_empty() {
             let next = self.queue.remove(0);
-            if let Err(e) = self.start_sound(&next.path, &next.name) {
+            if let Err(e) = self.start_sound(&next.path, &next.name, next.volume) {
                 log::error!("Skip failed: {e}");
             }
         }

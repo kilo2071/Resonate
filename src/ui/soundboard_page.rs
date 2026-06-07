@@ -47,10 +47,12 @@ mod imp {
         pub monitor_volume_scale: TemplateChild<gtk::Scale>,
 
         pub sounds: RefCell<Vec<SoundEntry>>,
-        pub play_fn: RefCell<Option<Box<dyn Fn(PathBuf) + 'static>>>,
-        pub cue_fn: RefCell<Option<Box<dyn Fn(PathBuf) + 'static>>>,
+        pub play_fn: RefCell<Option<Box<dyn Fn(PathBuf, f32) + 'static>>>,
+        pub cue_fn: RefCell<Option<Box<dyn Fn(PathBuf, f32) + 'static>>>,
         pub rename_fn: RefCell<Option<Box<dyn Fn(PathBuf) + 'static>>>,
         pub remove_fn: RefCell<Option<Box<dyn Fn(PathBuf) + 'static>>>,
+        /// Starting volume (0–100) for newly added tiles, from Settings.
+        pub default_volume: std::cell::Cell<f64>,
     }
 
     impl Default for ResonateSoundboardPage {
@@ -72,6 +74,7 @@ mod imp {
                 cue_fn: RefCell::new(None),
                 rename_fn: RefCell::new(None),
                 remove_fn: RefCell::new(None),
+                default_volume: std::cell::Cell::new(100.0),
             }
         }
     }
@@ -108,12 +111,17 @@ impl ResonateSoundboardPage {
         glib::Object::builder().build()
     }
 
-    pub fn set_play_callback<F: Fn(PathBuf) + 'static>(&self, f: F) {
+    pub fn set_play_callback<F: Fn(PathBuf, f32) + 'static>(&self, f: F) {
         *self.imp().play_fn.borrow_mut() = Some(Box::new(f));
     }
 
-    pub fn set_cue_callback<F: Fn(PathBuf) + 'static>(&self, f: F) {
+    pub fn set_cue_callback<F: Fn(PathBuf, f32) + 'static>(&self, f: F) {
         *self.imp().cue_fn.borrow_mut() = Some(Box::new(f));
+    }
+
+    /// Set the starting volume (0–100) applied to newly added tiles.
+    pub fn set_default_volume(&self, percent: f64) {
+        self.imp().default_volume.set(percent.clamp(0.0, 100.0));
     }
 
     pub fn set_rename_callback<F: Fn(PathBuf) + 'static>(&self, f: F) {
@@ -179,29 +187,32 @@ impl ResonateSoundboardPage {
 
         let n = self.imp().sound_grid.observe_children().n_items() + 1;
         let tile = ResonateSoundTile::new(n, &name);
+        tile.set_volume(self.imp().default_volume.get());
 
         let shared_path = Rc::new(RefCell::new(path.clone()));
 
         // Play button
         let sp_play = shared_path.clone();
+        let tile_play = tile.clone();
         tile.connect_play(glib::clone!(
             #[weak(rename_to = page)]
             self,
             move || {
                 if let Some(f) = page.imp().play_fn.borrow().as_ref() {
-                    f(sp_play.borrow().clone());
+                    f(sp_play.borrow().clone(), tile_play.volume_fraction());
                 }
             }
         ));
 
         // Cue button
         let sp_cue = shared_path.clone();
+        let tile_cue = tile.clone();
         tile.connect_cue(glib::clone!(
             #[weak(rename_to = page)]
             self,
             move || {
                 if let Some(f) = page.imp().cue_fn.borrow().as_ref() {
-                    f(sp_cue.borrow().clone());
+                    f(sp_cue.borrow().clone(), tile_cue.volume_fraction());
                 }
             }
         ));
