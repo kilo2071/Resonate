@@ -17,7 +17,12 @@ use livi::event::LV2AtomSequence;
 use livi::{EmptyPortConnections, Instance, PortIndex, PortType};
 
 use crate::audio::virtual_device::{CHANNELS, SAMPLE_RATE};
-use crate::plugins::{PluginParam, ResonatePlugin};
+use crate::plugins::{ParamKind, PluginParam, ResonatePlugin};
+
+// LV2 control-port property URIs used to pick the right UI control.
+const LV2_TOGGLED: &str = "http://lv2plug.in/ns/lv2core#toggled";
+const LV2_INTEGER: &str = "http://lv2plug.in/ns/lv2core#integer";
+const LV2_ENUMERATION: &str = "http://lv2plug.in/ns/lv2core#enumeration";
 
 /// `EffectEntry.id` prefix that marks an LV2 plugin (the rest is the LV2 URI).
 pub const LV2_ID_PREFIX: &str = "lv2:";
@@ -101,6 +106,44 @@ pub fn name_for_uri(uri: &str) -> Option<String> {
     host().world.plugin_by_uri(uri).map(|p| p.name())
 }
 
+/// Inspect a control-input port via lilv to choose the right UI control:
+/// toggle (boolean), dropdown (enumerated scale points), integer, or slider.
+fn classify_port(world: &livi::World, plugin: &livi::Plugin, index: usize) -> ParamKind {
+    let lworld = world.raw();
+    let Some(lport) = plugin.raw().port_by_index(index) else {
+        return ParamKind::Continuous;
+    };
+
+    if lport.has_property(&lworld.new_uri(LV2_TOGGLED)) {
+        return ParamKind::Toggle;
+    }
+
+    if lport.has_property(&lworld.new_uri(LV2_ENUMERATION)) {
+        let mut points: Vec<(String, f32)> = lport
+            .scale_points()
+            .into_iter()
+            .filter_map(|sp| {
+                let label = sp.label().as_str().map(str::to_string)?;
+                // Scale-point values are often integer literals (e.g. `rdf:value 0`),
+                // for which `as_float()` returns None — fall back to `as_int()`.
+                let vn = sp.value();
+                let value = vn.as_float().or_else(|| vn.as_int().map(|i| i as f32))?;
+                Some((label, value))
+            })
+            .collect();
+        if !points.is_empty() {
+            points.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
+            return ParamKind::Enum(points);
+        }
+    }
+
+    if lport.has_property(&lworld.new_uri(LV2_INTEGER)) {
+        return ParamKind::Integer;
+    }
+
+    ParamKind::Continuous
+}
+
 // ── Hosted plugin ───────────────────────────────────────────────────────────────
 
 pub struct Lv2Plugin {
@@ -141,6 +184,7 @@ impl Lv2Plugin {
                     .copied()
                     .unwrap_or(port.default_value)
                     .clamp(min.min(max), min.max(max));
+                let kind = classify_port(&h.world, &plugin, port.index.0);
                 params.push(PluginParam {
                     id: port.symbol.clone(),
                     label: port.name.clone(),
@@ -148,6 +192,7 @@ impl Lv2Plugin {
                     max,
                     default: port.default_value,
                     value,
+                    kind,
                 });
                 control_ports.insert(port.symbol.clone(), port.index);
             }

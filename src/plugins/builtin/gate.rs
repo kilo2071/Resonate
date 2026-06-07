@@ -1,4 +1,4 @@
-use crate::plugins::{PluginParam, ResonatePlugin};
+use crate::plugins::{ParamKind, PluginParam, ResonatePlugin};
 
 /// Simple RMS noise gate. Below threshold the gate closes; above (with hysteresis) it opens.
 pub struct NoiseGatePlugin {
@@ -93,6 +93,7 @@ impl ResonatePlugin for NoiseGatePlugin {
                 max: 1.0,
                 default: 0.02,
                 value: self.threshold,
+                kind: ParamKind::Continuous,
             },
             PluginParam {
                 id: "attack_ms".into(),
@@ -101,6 +102,7 @@ impl ResonatePlugin for NoiseGatePlugin {
                 max: 100.0,
                 default: 10.0,
                 value: self.attack_ms,
+                kind: ParamKind::Integer,
             },
             PluginParam {
                 id: "release_ms".into(),
@@ -109,6 +111,7 @@ impl ResonatePlugin for NoiseGatePlugin {
                 max: 1000.0,
                 default: 100.0,
                 value: self.release_ms,
+                kind: ParamKind::Integer,
             },
         ]
     }

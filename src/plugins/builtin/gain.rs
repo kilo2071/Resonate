@@ -1,4 +1,4 @@
-use crate::plugins::{PluginParam, ResonatePlugin};
+use crate::plugins::{ParamKind, PluginParam, ResonatePlugin};
 
 pub struct GainPlugin {
     enabled: bool,
@@ -38,6 +38,7 @@ impl ResonatePlugin for GainPlugin {
             max: 4.0,
             default: 1.0,
             value: self.gain,
+            kind: ParamKind::Continuous,
         }]
     }
 

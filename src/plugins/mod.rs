@@ -40,6 +40,19 @@ pub trait ResonatePlugin: Send {
     fn set_param(&mut self, id: &str, value: f32);
 }
 
+/// How a parameter should be presented and edited in the effects UI.
+#[derive(Debug, Clone)]
+pub enum ParamKind {
+    /// Continuous float — a slider.
+    Continuous,
+    /// Integer-valued — a slider with whole-number steps.
+    Integer,
+    /// Boolean — a switch (0.0 = off, 1.0 = on).
+    Toggle,
+    /// Enumerated choices — a dropdown of `(label, value)` options.
+    Enum(Vec<(String, f32)>),
+}
+
 #[derive(Debug, Clone)]
 pub struct PluginParam {
     pub id: String,
@@ -48,4 +61,5 @@ pub struct PluginParam {
     pub max: f32,
     pub default: f32,
     pub value: f32,
+    pub kind: ParamKind,
 }

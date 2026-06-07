@@ -5,7 +5,7 @@ use std::cell::RefCell;
 
 use crate::config::EffectEntry;
 use crate::plugins::lv2;
-use crate::plugins::PluginParam;
+use crate::plugins::{ParamKind, PluginParam};
 
 // ── Inner state ───────────────────────────────────────────────────────────────
 
@@ -276,7 +276,8 @@ impl ResonateEffectsPage {
         self.imp().settings_stack.set_visible_child_name("params");
     }
 
-    /// Build a slider per control parameter, generically from `PluginParam`.
+    /// Build a control per parameter, picking the widget from its `ParamKind`:
+    /// switch (toggle), dropdown (enum), or slider (continuous/integer).
     fn build_params(&self, idx: usize, params: &[PluginParam], container: &gtk::Box) {
         if params.is_empty() {
             let label = gtk::Label::builder()
@@ -291,35 +292,110 @@ impl ResonateEffectsPage {
         let group = adw::PreferencesGroup::new();
         for p in params {
             let row = adw::ActionRow::builder().title(&p.label).build();
-
-            let (lo, hi) = (p.min.min(p.max), p.min.max(p.max));
-            let scale = gtk::Scale::builder()
-                .orientation(gtk::Orientation::Horizontal)
-                .draw_value(true)
-                .value_pos(gtk::PositionType::Right)
-                .width_request(220)
-                .valign(gtk::Align::Center)
-                .build();
-            scale.set_range(lo as f64, hi as f64);
-            scale.set_digits(if (hi - lo) >= 100.0 { 0 } else { 2 });
-            scale.set_value(p.value.clamp(lo, hi) as f64);
-
-            // Connect AFTER set_value so initialisation doesn't fire the callback.
-            let param_id = p.id.clone();
-            scale.connect_value_changed(glib::clone!(
-                #[weak(rename_to = page)]
-                self,
-                move |s| {
-                    if let Some(f) = page.imp().param_fn.borrow().as_ref() {
-                        f(idx, param_id.clone(), s.value() as f32);
-                    }
-                }
-            ));
-
-            row.add_suffix(&scale);
+            match &p.kind {
+                ParamKind::Toggle => self.build_toggle(idx, p, &row),
+                ParamKind::Enum(points) => self.build_dropdown(idx, p, points, &row),
+                ParamKind::Integer => self.build_slider(idx, p, &row, true),
+                ParamKind::Continuous => self.build_slider(idx, p, &row, false),
+            }
             group.add(&row);
         }
         container.append(&group);
+    }
+
+    fn build_slider(&self, idx: usize, p: &PluginParam, row: &adw::ActionRow, integer: bool) {
+        let (lo, hi) = (p.min.min(p.max), p.min.max(p.max));
+        let scale = gtk::Scale::builder()
+            .orientation(gtk::Orientation::Horizontal)
+            .draw_value(true)
+            .value_pos(gtk::PositionType::Right)
+            .width_request(220)
+            .valign(gtk::Align::Center)
+            .build();
+        scale.set_range(lo as f64, hi as f64);
+        if integer {
+            scale.set_digits(0);
+            scale.set_round_digits(0);
+            scale.set_increments(1.0, 1.0);
+        } else {
+            scale.set_digits(if (hi - lo) >= 100.0 { 0 } else { 2 });
+        }
+        // Set value BEFORE connecting so initialisation doesn't fire the callback.
+        scale.set_value(p.value.clamp(lo, hi) as f64);
+
+        let param_id = p.id.clone();
+        scale.connect_value_changed(glib::clone!(
+            #[weak(rename_to = page)]
+            self,
+            move |s| {
+                if let Some(f) = page.imp().param_fn.borrow().as_ref() {
+                    f(idx, param_id.clone(), s.value() as f32);
+                }
+            }
+        ));
+        row.add_suffix(&scale);
+    }
+
+    fn build_toggle(&self, idx: usize, p: &PluginParam, row: &adw::ActionRow) {
+        let sw = gtk::Switch::builder().valign(gtk::Align::Center).build();
+        sw.set_active(p.value > 0.5);
+
+        let param_id = p.id.clone();
+        sw.connect_state_set(glib::clone!(
+            #[weak(rename_to = page)]
+            self,
+            #[upgrade_or]
+            glib::Propagation::Proceed,
+            move |_, state| {
+                if let Some(f) = page.imp().param_fn.borrow().as_ref() {
+                    f(idx, param_id.clone(), if state { 1.0 } else { 0.0 });
+                }
+                glib::Propagation::Proceed
+            }
+        ));
+        row.add_suffix(&sw);
+        row.set_activatable_widget(Some(&sw));
+    }
+
+    fn build_dropdown(
+        &self,
+        idx: usize,
+        p: &PluginParam,
+        points: &[(String, f32)],
+        row: &adw::ActionRow,
+    ) {
+        let labels: Vec<&str> = points.iter().map(|(l, _)| l.as_str()).collect();
+        let dropdown = gtk::DropDown::from_strings(&labels);
+        dropdown.set_valign(gtk::Align::Center);
+
+        // Pre-select the option whose value is closest to the current value.
+        let selected = points
+            .iter()
+            .enumerate()
+            .min_by(|(_, a), (_, b)| {
+                (a.1 - p.value)
+                    .abs()
+                    .partial_cmp(&(b.1 - p.value).abs())
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            })
+            .map(|(i, _)| i as u32)
+            .unwrap_or(0);
+        dropdown.set_selected(selected);
+
+        let param_id = p.id.clone();
+        let values: Vec<f32> = points.iter().map(|(_, v)| *v).collect();
+        dropdown.connect_selected_notify(glib::clone!(
+            #[weak(rename_to = page)]
+            self,
+            move |d| {
+                if let Some(v) = values.get(d.selected() as usize) {
+                    if let Some(f) = page.imp().param_fn.borrow().as_ref() {
+                        f(idx, param_id.clone(), *v);
+                    }
+                }
+            }
+        ));
+        row.add_suffix(&dropdown);
     }
 
     // ── Available effects (add sheet) ─────────────────────────────────────────
