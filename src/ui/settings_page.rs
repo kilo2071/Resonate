@@ -19,8 +19,6 @@ mod imp {
         #[template_child]
         pub polyphonic_row: TemplateChild<adw::SwitchRow>,
         #[template_child]
-        pub stop_on_play_row: TemplateChild<adw::SwitchRow>,
-        #[template_child]
         pub default_volume_row: TemplateChild<adw::SpinRow>,
         #[template_child]
         pub virtual_device_name_row: TemplateChild<adw::EntryRow>,

@@ -84,7 +84,6 @@ mod imp {
                     engine.set_monitor_volume(cfg.monitor_volume);
                     engine.set_monitor_enabled(cfg.monitor_enabled);
                     engine.set_mic_volume(cfg.mic_volume);
-                    engine.set_stop_on_play(cfg.stop_on_play);
                     *self.audio_engine.borrow_mut() = Some(engine);
                 }
                 Err(e) => log::error!("Audio engine init failed: {}", e),
@@ -790,21 +789,6 @@ impl ResonateWindow {
                 win.imp().config.borrow().save();
                 if let Some(engine) = win.imp().audio_engine.borrow_mut().as_mut() {
                     engine.set_polyphonic(v);
-                }
-            }
-        ));
-
-        // Stop-on-second-press toggle → update engine
-        settings.imp().stop_on_play_row.set_active(config.stop_on_play);
-        settings.imp().stop_on_play_row.connect_active_notify(glib::clone!(
-            #[weak(rename_to = win)]
-            self,
-            move |row| {
-                let v = row.is_active();
-                win.imp().config.borrow_mut().stop_on_play = v;
-                win.imp().config.borrow().save();
-                if let Some(engine) = win.imp().audio_engine.borrow_mut().as_mut() {
-                    engine.set_stop_on_play(v);
                 }
             }
         ));

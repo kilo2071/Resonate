@@ -187,7 +187,6 @@ pub struct Config {
     pub sounds_folder: PathBuf,
     pub move_files_to_folder: bool,
     pub polyphonic: bool,
-    pub stop_on_play: bool,                // press play on a playing sound → stop it
     pub default_volume: u32,               // 0–100 start volume for new tiles
     pub virtual_device_name: String,
     pub virtual_device_enabled: bool,
@@ -205,11 +204,12 @@ pub struct EffectEntry {
 }
 ```
 
-Soundboard playback settings are applied in `AudioEngine`: `stop_on_play` and
-`polyphonic` gate `play()`; per-tile volume is a 0–1 factor passed into
-`play()`/`cue()` (read from each tile's slider at click time) that scales both the
-rodio monitor sink and the virtual-mic PCM mix. The monitor always uses the
-system default output (there is no monitor-device picker).
+Soundboard playback settings are applied in `AudioEngine`: `polyphonic` gates
+`play()` (off = queue instead of overlap; the same sound can be stacked while
+polyphonic is on); per-tile volume is a 0–1 factor passed into `play()`/`cue()`
+(read from each tile's slider at click time) that scales both the rodio monitor
+sink and the virtual-mic PCM mix. The monitor always uses the system default
+output (there is no monitor-device picker).
 
 ## Coding Conventions
 

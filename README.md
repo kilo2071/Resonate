@@ -10,8 +10,7 @@ A native GNOME soundboard with polyphonic playback, a sequential queue, a real-t
 ### Soundboard
 - **Soundboard grid** — load any number of audio files; each tile has its own volume slider and play/cue controls
 - **Per-sound volume** — each tile's slider scales that sound in both the local monitor and the virtual mic; new tiles start at the configurable **Default Volume**
-- **Polyphonic & sequential modes** — play sounds simultaneously or queue them up; toggled in Settings
-- **Stop on second press** — optionally stop an already-playing sound by pressing its play button again (Settings)
+- **Polyphonic & sequential modes** — play (and stack) sounds simultaneously, or queue them up; toggled in Settings
 - **Cue button** — always appends to the queue, regardless of mode
 - **Skip** — stops all currently playing sounds and immediately starts the next item in the queue
 - **LCD playback panel** — fixed-height scrollable list of all active tracks with per-track countdown; large aggregate total-time counter on the right; "time until next" appears below it when a queue is active
@@ -23,7 +22,7 @@ A native GNOME soundboard with polyphonic playback, a sequential queue, a real-t
 - **Sounds Folder** + **Move Added Files** — where sounds live, and whether new files are moved there
 - **Input Device** — pick which physical microphone feeds the effects chain (default = auto-detect)
 - **Monitor Output** — hear the soundboard yourself on the system default output (toggle); monitor level is the slider on the soundboard bar
-- **Playback** — Play Multiple Sounds (polyphonic), Stop on Second Press, and Default Volume for new tiles
+- **Playback** — Play Multiple Sounds (polyphonic) and Default Volume for new tiles
 - **Virtual Device** — set the virtual mic's display name and whether it is created on launch
 
 ### Virtual microphone
@@ -88,24 +87,27 @@ runs once when the Effects page first opens). A handy mic chain, in order:
 
 ## GNOME integration (icon & app name)
 
-To make the icon and "Resonate" name appear in GNOME Overview and Alt+Tab, install the development desktop entry once:
+GNOME matches a running window to its `.desktop` file by **app ID**
+(`io.github.kilo2071.Resonate`), so the desktop entry's basename, its `Icon=`,
+and the installed icon file must all use that exact ID — otherwise the Overview
+and Alt+Tab show a generic name/icon.
+
+For a development build, install the committed desktop entry and icon once
+(pointing `Exec` at your built binary):
 
 ```bash
-mkdir -p ~/.local/share/icons/hicolor/scalable/apps
+mkdir -p ~/.local/share/icons/hicolor/scalable/apps ~/.local/share/applications
 cp data/icons/io.github.kilo2071.Resonate.svg ~/.local/share/icons/hicolor/scalable/apps/
 
-cat > ~/.local/share/applications/io.github.kilo2071.Resonate.desktop << 'EOF'
-[Desktop Entry]
-Name=Resonate
-Exec=/path/to/target/debug/resonate
-Icon=io.github.kilo2071.Resonate
-Type=Application
-Categories=AudioVideo;Audio;
-EOF
+sed "s|^Exec=resonate|Exec=$PWD/target/debug/resonate|" \
+  data/io.github.kilo2071.Resonate.desktop \
+  > ~/.local/share/applications/io.github.kilo2071.Resonate.desktop
 
 gtk-update-icon-cache -f -t ~/.local/share/icons/hicolor/
 update-desktop-database ~/.local/share/applications/
 ```
+
+(An RPM install puts the same files under `/usr/share` with `Exec=resonate`.)
 
 ## Project layout
 

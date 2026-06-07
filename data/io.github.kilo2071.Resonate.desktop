@@ -1,0 +1,9 @@
+[Desktop Entry]
+Name=Resonate
+Comment=Soundboard with a virtual microphone and real-time mic effects
+Exec=resonate
+Icon=io.github.kilo2071.Resonate
+Type=Application
+Categories=AudioVideo;Audio;
+StartupWMClass=io.github.kilo2071.Resonate
+Keywords=soundboard;audio;microphone;effects;voice;virtual;mic;

@@ -114,8 +114,6 @@ pub struct AudioEngine {
 
     monitor_volume: f32,
     monitor_enabled: bool,
-    /// When true, pressing play on an already-playing sound stops it instead.
-    stop_on_play: bool,
 
     /// Mic effects chain, shared with the PipeWire mic capture thread.
     effects: SharedChain,
@@ -136,7 +134,6 @@ impl AudioEngine {
             last_tick: Instant::now(),
             monitor_volume: 1.0,
             monitor_enabled: true,
-            stop_on_play: true,
             effects: Arc::new(Mutex::new(PluginChain::new())),
         })
     }
@@ -191,10 +188,6 @@ impl AudioEngine {
         // Virtual device is NOT muted here — it always mirrors soundboard + mic.
     }
 
-    pub fn set_stop_on_play(&mut self, v: bool) {
-        self.stop_on_play = v;
-    }
-
     pub fn set_mic_volume(&mut self, v: f32) {
         if let Some(vd) = &self.virtual_device {
             vd.set_mic_volume(v);
@@ -218,11 +211,6 @@ impl AudioEngine {
     // ── Playback ──────────────────────────────────────────────────────────────
 
     pub fn play(&mut self, path: &Path, name: &str, volume: f32) -> Result<()> {
-        // "Stop on Second Press": pressing play on an already-playing sound stops it.
-        if self.stop_on_play && self.playing.iter().any(|s| s.path == path) {
-            self.playing.retain(|s| s.path != path);
-            return Ok(());
-        }
         if self.polyphonic || self.playing.is_empty() {
             self.start_sound(path, name, volume)?;
         } else {

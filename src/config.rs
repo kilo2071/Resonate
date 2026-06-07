@@ -33,7 +33,6 @@ pub struct Config {
     pub sounds_folder: PathBuf,
     pub move_files_to_folder: bool,
     pub polyphonic: bool,
-    pub stop_on_play: bool,
     pub default_volume: u32,
 
     // Virtual device
@@ -68,7 +67,6 @@ impl Default for Config {
             sounds_folder: docs.join("Sounds"),
             move_files_to_folder: true,
             polyphonic: true,
-            stop_on_play: true,
             default_volume: 100,
             virtual_device_name: "Resonate Microphone".to_string(),
             virtual_device_enabled: true,

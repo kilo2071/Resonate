@@ -73,13 +73,6 @@
           </object>
         </child>
         <child>
-          <object class="AdwSwitchRow" id="stop_on_play_row">
-            <property name="title" translatable="yes">Stop on Second Press</property>
-            <property name="subtitle" translatable="yes">Pressing play on an already-playing sound stops it</property>
-            <property name="active">true</property>
-          </object>
-        </child>
-        <child>
           <object class="AdwSpinRow" id="default_volume_row">
             <property name="title" translatable="yes">Default Volume</property>
             <property name="subtitle" translatable="yes">Starting volume for newly added sounds (0–100)</property>
