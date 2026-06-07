@@ -20,6 +20,10 @@ Source0:        %{name}-%{version}.tar.gz
 
 ExclusiveArch:  %{rust_arches}
 
+# The release binary is built without debug symbols, so skip the (empty)
+# -debuginfo subpackage that rpmbuild would otherwise try to create.
+%global debug_package %{nil}
+
 BuildRequires:  cargo
 BuildRequires:  rust
 BuildRequires:  gcc
