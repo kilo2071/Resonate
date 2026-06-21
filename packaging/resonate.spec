@@ -81,6 +81,6 @@ desktop-file-validate %{buildroot}%{_datadir}/applications/%{appid}.desktop
 %{_datadir}/icons/hicolor/scalable/apps/%{appid}.svg
 
 %changelog
-* Sun Jun 07 2026 kilo2071 <gerhardprins@icloud.com> - 0.1.0-1
+* Sun Jun 07 2026 kilo2071 <74557968+kilo2071@users.noreply.github.com> - 0.1.0-1
 - Initial package: soundboard, PipeWire virtual mic, LV2 mic effects,
   background mode with tray indicator and start-on-login.
