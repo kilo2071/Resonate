@@ -1,6 +1,6 @@
 # Resonate
 
-There wasn't a nice native soundboard app for GNOME, so I vibecoded one over a couple of days with [Claude](https://www.anthropic.com/claude-code). It turned into a GTK 4 + Libadwaita app in Rust with polyphonic playback, a sequential queue, a real-time LCD panel, **a PipeWire virtual microphone, and a real-time mic effects chain (built-in + LV2 plugins)**.
+There wasn't a nice native soundboard app for GNOME, so I vibecoded one over a couple of days with [Claude](https://www.anthropic.com/claude-code). It turned into a GTK 4 + Libadwaita app in Rust with polyphonic playback, a sequential queue, a real-time LCD panel with oscilloscope and scrubbing, per-sound editing (start/trim/fades), global numpad hotkeys, **a PipeWire virtual microphone, and a real-time mic effects chain (built-in + LV2 plugins, with presets)**.
 
 > ⚠️ **Use at your own risk.** This is a hobby project that is largely AI-generated and lightly tested. It pokes at your PipeWire graph and sets your default input device, so expect rough edges — back up nothing important and don't run it in the middle of an important call. No warranty, etc. etc.
 
@@ -10,13 +10,18 @@ There wasn't a nice native soundboard app for GNOME, so I vibecoded one over a c
 ## Features
 
 ### Soundboard
-- **Soundboard grid** — load any number of audio files; each tile has its own volume slider and play/cue controls
-- **Per-sound volume** — each tile's slider scales that sound in both the local monitor and the virtual mic; new tiles start at the configurable **Default Volume**
+- **Compact tile grid** — load any number of audio files; play/cue on the tile, volume + editor + rename/remove in the tile's ⋮ menu; **search** box to filter; **drag a tile onto another to reorder** (order is saved)
+- **Per-sound settings, persisted** — volume, start marker, end trim and fade in/out are saved per sound (`config.json`) and survive renames; volume changes apply live to already-playing sounds
+- **Sound editor** — per-sound dialog with the decoded waveform: drag the orange start marker / red end-trim marker, set fades, and preview from the marker (monitor-only, with playhead)
+- **Selection + one-shot start** — click a tile to select it, then drag the LCD progress bar to set a *one-shot* start point that only the next play uses; the transport preview (headphones) and play buttons act on the selection
+- **Scrub while playing** — drag the progress bar during playback to seek
+- **Loudness normalization** — newly imported sounds are analyzed and their volume pre-set so peaks land near −1 dBFS (loud files are only ever turned down)
+- **Global hotkeys** — Ctrl+Alt + a tile number typed on the numpad plays that tile (e.g. `5` `6` → tile 56); Ctrl+Alt+Numpad Enter stops everything (XDG GlobalShortcuts portal; GNOME asks for approval once)
 - **Polyphonic & sequential modes** — play (and stack) sounds simultaneously, or queue them up; toggled in Settings
 - **Cue button** — always appends to the queue, regardless of mode
 - **Skip** — stops all currently playing sounds and immediately starts the next item in the queue
-- **LCD playback panel** — fixed-height scrollable list of all active tracks with per-track countdown; large aggregate total-time counter on the right; "time until next" appears below it when a queue is active
-- **Rename** — rename sound tiles with an in-place dialog; the file on disk and all playback references are updated atomically
+- **LCD playback panel** — scrollable track list with per-track countdown, a live **oscilloscope** of the playing mix, aggregate time totals, and the interactive progress bar
+- **Rename** — rename sound tiles with an in-place dialog; the file on disk, saved settings and all playback references follow
 - **Remove with undo** — moves the file out of the Sounds Folder (cross-filesystem safe), removes the tile, and shows a 6-second undo toast; permanent deletion happens on dismiss
 - **Sounds Folder** — configure a folder in Settings; all audio files found there are loaded automatically on launch
 
@@ -35,9 +40,11 @@ There wasn't a nice native soundboard app for GNOME, so I vibecoded one over a c
 - **Survives across logins** — a PipeWire drop-in (`~/.config/pipewire/pipewire.conf.d/resonate.conf`) keeps a raw mic pass-through alive even when Resonate isn't running
 
 ### Mic effects
-- **Real-time effects chain** applied to the microphone: built-in **Noise Gate** and **Gain**, plus **any installed LV2 plugin** (hosted via [`livi`](https://github.com/wmedrano/livi))
-- **Add / remove** effects from the Effects page; controls are generated automatically per plugin and rendered by type — sliders, switches (toggles) and dropdowns (enumerated choices)
-- Chain is persisted to `config.json` and re-applied on launch
+- **Real-time effects chain** applied to the microphone: built-in **Noise Gate**, **Gain**, **Distortion**, **Bitcrusher** and **Telephone** (band-limit filter), plus a curated set of LV2 plugins (hosted via [`livi`](https://github.com/wmedrano/livi)): **Auto Gain**, **Noise Suppression (RNNoise)**, **Compressor**, **Limiter** and **Graphic/Parametric EQ** — the same plugins Easy Effects wraps
+- **Add / remove / reorder** effects from the Effects page; controls are generated automatically per plugin and rendered by type — sliders, switches (toggles) and dropdowns (enumerated choices)
+- **Presets** — save the current chain under a name and switch between chains in one click
+- **Level meter** — live post-effects mic level, so you can set the gate threshold by eye
+- Chain and presets are persisted to `config.json` and re-applied on launch. (The Add sheet only lists the curated plugins, but a chain referencing any other installed LV2 id still loads.)
 
 ### Background mode (Easy Effects-style)
 - **Run in the background** — closing the window hides Resonate instead of quitting, so the mic effects keep processing
@@ -112,9 +119,10 @@ sudo dnf copr enable ycollet/audinux
 sudo dnf install noise-repellent
 ```
 
-Newly installed plugins are picked up the next time Resonate starts (discovery
-runs once when the Effects page first opens). A handy mic chain, in order:
-**Noise Gate** → **noise-repellent / RNNoise** → **LSP Autogain** → **Gain**.
+The Add Effect sheet shows the built-ins plus a curated set of installed LV2
+plugins (discovery runs once when the Effects page first opens). A handy mic
+chain, in order: **Noise Gate** → **Noise Suppression (RNNoise)** →
+**Auto Gain** → **Gain**.
 
 ## GNOME integration (icon & app name)
 
@@ -145,25 +153,32 @@ update-desktop-database ~/.local/share/applications/
 ```
 src/
   main.rs               — GTK/Adwaita init, GResources, CSS, app entry
-  application.rs        — AdwApplication subclass
-  window.rs             — AdwApplicationWindow; audio/effects wiring, rename/remove logic
-  config.rs             — Config + EffectEntry (serde_json)
+  application.rs        — AdwApplication subclass (registers --hidden)
+  window.rs             — AdwApplicationWindow; audio/effects/hotkey wiring, rename/remove logic
+  config.rs             — Config, EffectEntry, per-sound SoundSettings (serde_json)
+  hotkeys.rs            — global hotkeys via the GlobalShortcuts portal (blocking dbus)
+  tray.rs               — StatusNotifierItem tray (ksni)
   audio/
-    engine.rs           — rodio polyphonic engine, queue, tick loop, shared FX chain
+    engine.rs           — rodio polyphonic engine, queue, tick loop, seek, envelope, scope feed
     virtual_device.rs   — in-process PipeWire streams: bridge, soundboard + mic capture/playback
     pw_config.rs        — routing plan, mic detection, loopback teardown, drop-in persistence
+    wave.rs             — waveform peak data shared by the editor and the LCD
     sampler.rs          — (legacy stub)
   plugins/
-    mod.rs              — ResonatePlugin trait, PluginParam, plugin_from_entry factory
+    mod.rs              — ResonatePlugin trait, PluginParam, BUILTINS + CURATED_LV2 registries
     host.rs             — PluginChain
     lv2.rs              — LV2 host (livi): discovery + Lv2Plugin
     builtin/
       gain.rs           — Gain (0.0–4.0× linear)
       gate.rs           — Noise Gate (RMS, attack/release)
+      distortion.rs     — tanh waveshaper (drive/mix/level)
+      bitcrush.rs       — bit depth + sample-and-hold downsampling
+      telephone.rs      — band-limit filter (old phone/radio)
   ui/
-    soundboard_page.rs  — sound grid, LCD panel, time totals
-    sound_tile.rs       — individual tile widget
-    effects_page.rs     — mic effects chain editor (built-in + LV2)
+    soundboard_page.rs  — sound grid, selection, LCD panel (oscilloscope, progress scrub)
+    sound_tile.rs       — individual tile widget (menu: volume, edit, rename, remove)
+    sound_editor.rs     — waveform editor dialog (markers, fades, preview)
+    effects_page.rs     — mic effects chain editor (built-in + curated LV2, presets, meter)
     settings_page.rs    — folder picker, virtual device / input settings
 resources/
   ui/                   — GTK XML UI templates

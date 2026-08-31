@@ -11,7 +11,7 @@
 
 Name:           resonate
 Version:        0.1.0
-Release:        1%{?dist}
+Release:        2%{?dist}
 Summary:        Soundboard with a virtual microphone and real-time mic effects
 
 License:        GPL-3.0-or-later
@@ -53,9 +53,12 @@ Recommends:     lsp-plugins-lv2
 Resonate is a native GNOME soundboard built with GTK 4 and Libadwaita. It
 exposes a PipeWire virtual microphone that mixes soundboard playback with your
 real microphone, and applies a real-time effects chain to the mic input using
-built-in Noise Gate / Gain plugins plus any installed LV2 plugin. It can run in
-the background (with a tray indicator) and start on login, acting as a
-voice-effects processor for calls, streaming and recording.
+built-in plugins (Noise Gate, Gain, Distortion, Bitcrusher, Telephone) plus a
+curated set of LV2 plugins (Auto Gain, RNNoise noise suppression, compressor,
+limiter, EQs), with named chain presets. Sounds have per-file volume, start
+markers, trimming and fades, and can be triggered by global numpad hotkeys. It
+can run in the background (with a tray indicator) and start on login, acting as
+a voice-effects processor for calls, streaming and recording.
 
 %prep
 %autosetup -n %{name}-%{version}
@@ -81,6 +84,14 @@ desktop-file-validate %{buildroot}%{_datadir}/applications/%{appid}.desktop
 %{_datadir}/icons/hicolor/scalable/apps/%{appid}.svg
 
 %changelog
+* Mon Aug 31 2026 kilo2071 <gerhardprins@icloud.com> - 0.1.0-2
+- Per-sound settings (volume/start/trim/fades), sound editor, LCD scrubbing +
+  oscilloscope, search, tile reorder, import normalization
+- New built-in effects (Distortion, Bitcrusher, Telephone), curated LV2 picker,
+  chain presets and reorder, mic level meter
+- Global numpad hotkeys via the GlobalShortcuts portal (dbus crate; the dbus-1
+  BuildRequires was already in place); fixed the --hidden autostart entry
+
 * Sun Jun 07 2026 kilo2071 <gerhardprins@icloud.com> - 0.1.0-1
 - Initial package: soundboard, PipeWire virtual mic, LV2 mic effects,
   background mode with tray indicator and start-on-login.

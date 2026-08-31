@@ -26,9 +26,11 @@ Config stored at: `~/.config/io.github.kilo2071.Resonate/config.json`
 ## Features
 
 ### Core
-- Soundboard: load and play audio samples (per-tile volume, polyphonic stacking + queue), monitored through the system default output
+- Soundboard: load and play audio samples (per-sound persisted volume/start/trim/fades, polyphonic stacking + queue, search, drag-reorder), monitored through the system default output
+- Sound editor dialog (waveform, markers, fades) + LCD progress-bar scrubbing (seek while playing, one-shot start point while idle) + live oscilloscope
 - Virtual audio device: PipeWire virtual source so sounds and mic appear as one mic input to other apps
-- Plugin system: apply real-time effects to microphone input (built-in Noise Gate, Gain + any installed LV2 plugin)
+- Plugin system: apply real-time effects to microphone input (built-ins + curated LV2), with named chain presets and a post-effects level meter
+- Global hotkeys: Ctrl+Alt + numpad digits play a tile by number; Ctrl+Alt+Numpad Enter stops all (GlobalShortcuts portal)
 - Background mode: close-to-tray keeps effects running; SNI tray indicator + optional start-on-login (see "Lifecycle / background mode")
 
 ### Plugin Architecture
@@ -36,7 +38,7 @@ Config stored at: `~/.config/io.github.kilo2071.Resonate/config.json`
 - Installed LV2 plugins are hosted via the `livi` crate (links `lilv`) in `src/plugins/lv2.rs`, wrapped behind the same `ResonatePlugin` trait. A single process-global `Lv2Host` owns the `livi::World` for the program lifetime (lilv instances don't keep the world alive).
 - The chain runs in-process on the PipeWire **mic capture** callback (`src/audio/virtual_device.rs`): physical mic → `PluginChain::process` → Resonate sink. The chain is `Arc<Mutex<PluginChain>>`, shared with the UI thread (`try_lock` in the RT callback).
 - Chain is serialised to `config.json` as `effects_chain: Vec<EffectEntry>`. Built-in entries use ids `gain`/`gate`; LV2 entries use id `lv2:<uri>` with control values keyed by port symbol.
-- The effects page builds parameter sliders generically from `ResonatePlugin::params()`, so LV2 plugins get controls automatically; the "Add effect" sheet lists built-ins, then curated LV2 plugins (`CURATED_LV2` — friendly names for the same LSP/RNNoise plugins Easy Effects wraps), then the rest of `lv2::discover()`.
+- The effects page builds parameter sliders generically from `ResonatePlugin::params()`, so LV2 plugins get controls automatically; the "Add effect" sheet lists built-ins, then curated LV2 plugins only (`CURATED_LV2` — friendly names for the same LSP/RNNoise plugins Easy Effects wraps). The raw `lv2::discover()` catalogue is deliberately not shown, but chains referencing other LV2 ids still load.
 - The `easyeffects/` directory is a reference clone of Easy Effects — **never built or linked**. EE's effects are thin wrappers around Calf/LSP LV2 plugins; Resonate follows the same approach through its own `livi` host. Calf's LV2 bundle is not packaged on Fedora, so the fun effects (distortion, bitcrush, telephone) are native built-ins instead.
 
 ## Key Dependencies
@@ -47,6 +49,7 @@ gtk = { version = "0.11", package = "gtk4", features = ["v4_14"] }
 adw = { version = "0.9", package = "libadwaita", features = ["v1_6"] }
 pipewire = "0.10"
 livi = "0.7"          # LV2 host (links system lilv/lv2 dev libs)
+dbus = "0.9"          # GlobalShortcuts portal client (same libdbus ksni links)
 libloading = "0.8"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
