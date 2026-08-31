@@ -458,35 +458,54 @@ impl ResonateEffectsPage {
 
     fn build_slider(&self, idx: usize, p: &PluginParam, row: &adw::ActionRow, integer: bool) {
         let (lo, hi) = (p.min.min(p.max), p.min.max(p.max));
+        let digits: u32 = if integer || (hi - lo) >= 100.0 { 0 } else { 2 };
+        let step = if digits == 0 { 1.0 } else { 10f64.powi(-(digits as i32)) };
+
+        // Scale and spin share one adjustment, so typing and dragging stay in sync
+        // and the param callback only has to be connected once.
+        let adj = gtk::Adjustment::new(
+            p.value.clamp(lo, hi) as f64,
+            lo as f64,
+            hi as f64,
+            step,
+            step * 10.0,
+            0.0,
+        );
+
         let scale = gtk::Scale::builder()
             .orientation(gtk::Orientation::Horizontal)
-            .draw_value(true)
-            .value_pos(gtk::PositionType::Right)
-            .width_request(220)
+            .adjustment(&adj)
+            .draw_value(false)
+            .hexpand(true)
+            .width_request(160)
             .valign(gtk::Align::Center)
             .build();
-        scale.set_range(lo as f64, hi as f64);
         if integer {
-            scale.set_digits(0);
             scale.set_round_digits(0);
-            scale.set_increments(1.0, 1.0);
-        } else {
-            scale.set_digits(if (hi - lo) >= 100.0 { 0 } else { 2 });
         }
-        // Set value BEFORE connecting so initialisation doesn't fire the callback.
-        scale.set_value(p.value.clamp(lo, hi) as f64);
+
+        // Manual entry — sliders are hopeless for exact values (sample rates etc.).
+        let spin = gtk::SpinButton::builder()
+            .adjustment(&adj)
+            .digits(digits)
+            .climb_rate(step)
+            .numeric(true)
+            .valign(gtk::Align::Center)
+            .build();
+        spin.set_width_chars(8);
 
         let param_id = p.id.clone();
-        scale.connect_value_changed(glib::clone!(
+        adj.connect_value_changed(glib::clone!(
             #[weak(rename_to = page)]
             self,
-            move |s| {
+            move |a| {
                 if let Some(f) = page.imp().param_fn.borrow().as_ref() {
-                    f(idx, param_id.clone(), s.value() as f32);
+                    f(idx, param_id.clone(), a.value() as f32);
                 }
             }
         ));
         row.add_suffix(&scale);
+        row.add_suffix(&spin);
     }
 
     fn build_toggle(&self, idx: usize, p: &PluginParam, row: &adw::ActionRow) {
