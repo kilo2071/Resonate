@@ -47,3 +47,10 @@
     color: alpha(#ffffff, 0.55);
     letter-spacing: 0.12em;
 }
+
+/* Selected sound tile (click a tile to select; scrub it in the LCD) */
+.sound-selected {
+    outline: 2px solid @accent_bg_color;
+    outline-offset: -2px;
+    border-radius: 12px;
+}

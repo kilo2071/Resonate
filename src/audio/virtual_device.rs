@@ -53,6 +53,8 @@ pub struct VirtualDeviceHandle {
     pub enabled: Arc<AtomicBool>,
     /// Linear gain applied to the captured microphone before the effects chain.
     pub mic_volume: Arc<AtomicU32>,
+    /// Post-effects RMS of the mic capture (f32 bits), written by the PW thread.
+    pub mic_level: Arc<AtomicU32>,
     pub ctrl: pipewire::channel::Sender<PwCtrl>,
     _thread: JoinHandle<()>,
 }
@@ -79,6 +81,11 @@ impl VirtualDeviceHandle {
 
     pub fn set_enabled(&self, v: bool) {
         self.enabled.store(v, Ordering::Relaxed);
+    }
+
+    /// Latest post-effects mic RMS level, 0.0–1.0.
+    pub fn mic_level(&self) -> f32 {
+        f32::from_bits(self.mic_level.load(Ordering::Relaxed))
     }
 }
 
@@ -124,6 +131,7 @@ pub fn start(
     let volume = Arc::new(AtomicU32::new(1.0f32.to_bits()));
     let enabled = Arc::new(AtomicBool::new(true));
     let mic_vol = Arc::new(AtomicU32::new(mic_volume.to_bits()));
+    let mic_level = Arc::new(AtomicU32::new(0.0f32.to_bits()));
 
     let (ctrl_tx, ctrl_rx) = pipewire::channel::channel::<PwCtrl>();
 
@@ -131,6 +139,7 @@ pub fn start(
     let vol_clone = volume.clone();
     let en_clone = enabled.clone();
     let mic_vol_clone = mic_vol.clone();
+    let mic_level_clone = mic_level.clone();
 
     let thread = thread::Builder::new()
         .name("resonate-pw".into())
@@ -140,6 +149,7 @@ pub fn start(
                 vol_clone,
                 en_clone,
                 mic_vol_clone,
+                mic_level_clone,
                 effects,
                 mic_target,
                 bridge_args,
@@ -154,6 +164,7 @@ pub fn start(
         volume,
         enabled,
         mic_volume: mic_vol,
+        mic_level,
         ctrl: ctrl_tx,
         _thread: thread,
     })
@@ -203,6 +214,7 @@ fn run_pw_thread(
     volume: Arc<AtomicU32>,
     enabled: Arc<AtomicBool>,
     mic_volume: Arc<AtomicU32>,
+    mic_level: Arc<AtomicU32>,
     effects: Arc<Mutex<PluginChain>>,
     mic_target: Option<String>,
     bridge_args: Option<String>,
@@ -369,6 +381,7 @@ fn run_pw_thread(
     let scratch_cap = mic_scratch.clone();
     let effects_cap = effects.clone();
     let mic_vol_cap = mic_volume.clone();
+    let mic_level_cb = mic_level.clone();
     let _mic_cap_listener = mic_capture
         .add_local_listener_with_user_data(())
         .process(move |stream, _| {
@@ -416,6 +429,13 @@ fn run_pw_thread(
 
             if let Ok(mut chain) = effects_cap.try_lock() {
                 chain.process(&mut scratch, SAMPLE_RATE);
+            }
+
+            // Post-effects RMS for the UI level meter (lock-free store).
+            if !scratch.is_empty() {
+                let sum_sq: f32 = scratch.iter().map(|s| s * s).sum();
+                let rms = (sum_sq / scratch.len() as f32).sqrt();
+                mic_level_cb.store(rms.to_bits(), Ordering::Relaxed);
             }
 
             let mut bridge = bridge_cap.borrow_mut();

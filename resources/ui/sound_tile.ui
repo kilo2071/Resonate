@@ -5,12 +5,12 @@
   <template class="ResonateSoundTile" parent="GtkBox">
     <property name="orientation">vertical</property>
     <property name="spacing">0</property>
-    <property name="width-request">170</property>
-    <property name="height-request">190</property>
-    <property name="margin-top">8</property>
-    <property name="margin-bottom">8</property>
-    <property name="margin-start">8</property>
-    <property name="margin-end">8</property>
+    <property name="width-request">128</property>
+    <property name="height-request">104</property>
+    <property name="margin-top">4</property>
+    <property name="margin-bottom">4</property>
+    <property name="margin-start">4</property>
+    <property name="margin-end">4</property>
     <style>
       <class name="card"/>
     </style>
@@ -19,9 +19,9 @@
     <child>
       <object class="GtkBox">
         <property name="orientation">horizontal</property>
-        <property name="margin-top">8</property>
-        <property name="margin-start">10</property>
-        <property name="margin-end">4</property>
+        <property name="margin-top">2</property>
+        <property name="margin-start">8</property>
+        <property name="margin-end">2</property>
         <child>
           <object class="GtkLabel" id="number_label">
             <property name="label">1</property>
@@ -50,11 +50,54 @@
                 <property name="child">
                   <object class="GtkBox">
                     <property name="orientation">vertical</property>
-                    <property name="margin-top">4</property>
-                    <property name="margin-bottom">4</property>
-                    <property name="margin-start">4</property>
-                    <property name="margin-end">4</property>
-                    <property name="spacing">2</property>
+                    <property name="margin-top">6</property>
+                    <property name="margin-bottom">6</property>
+                    <property name="margin-start">6</property>
+                    <property name="margin-end">6</property>
+                    <property name="spacing">4</property>
+                    <!-- Per-sound volume -->
+                    <child>
+                      <object class="GtkBox">
+                        <property name="orientation">horizontal</property>
+                        <property name="spacing">6</property>
+                        <child>
+                          <object class="GtkImage">
+                            <property name="icon-name">audio-volume-medium-symbolic</property>
+                            <style>
+                              <class name="dim-label"/>
+                            </style>
+                          </object>
+                        </child>
+                        <child>
+                          <object class="GtkScale" id="volume_scale">
+                            <property name="width-request">150</property>
+                            <property name="draw-value">false</property>
+                            <property name="tooltip-text" translatable="yes">Sound volume</property>
+                            <property name="adjustment">
+                              <object class="GtkAdjustment">
+                                <property name="lower">0</property>
+                                <property name="upper">100</property>
+                                <property name="value">100</property>
+                                <property name="step-increment">1</property>
+                              </object>
+                            </property>
+                          </object>
+                        </child>
+                      </object>
+                    </child>
+                    <child>
+                      <object class="GtkSeparator">
+                        <property name="orientation">horizontal</property>
+                      </object>
+                    </child>
+                    <child>
+                      <object class="GtkButton" id="edit_button">
+                        <property name="label" translatable="yes">Edit Sound…</property>
+                        <style>
+                          <class name="flat"/>
+                        </style>
+                      </object>
+                    </child>
                     <child>
                       <object class="GtkButton" id="rename_button">
                         <property name="label" translatable="yes">Rename…</property>
@@ -81,23 +124,23 @@
       </object>
     </child>
 
-    <!-- Sound name — more breathing room with margins -->
+    <!-- Sound name -->
     <child>
       <object class="GtkLabel" id="name_label">
         <property name="label" translatable="yes">Sound</property>
         <property name="hexpand">true</property>
         <property name="vexpand">true</property>
+        <property name="ellipsize">end</property>
+        <property name="lines">2</property>
         <property name="wrap">true</property>
         <property name="wrap-mode">word-char</property>
         <property name="justify">center</property>
-        <property name="max-width-chars">11</property>
+        <property name="max-width-chars">13</property>
         <property name="valign">center</property>
-        <property name="margin-start">12</property>
-        <property name="margin-end">12</property>
-        <property name="margin-top">4</property>
-        <property name="margin-bottom">4</property>
+        <property name="margin-start">8</property>
+        <property name="margin-end">8</property>
         <style>
-          <class name="title-2"/>
+          <class name="heading"/>
         </style>
       </object>
     </child>
@@ -107,8 +150,9 @@
       <object class="GtkBox">
         <property name="orientation">horizontal</property>
         <property name="halign">center</property>
-        <property name="spacing">10</property>
-        <property name="margin-bottom">6</property>
+        <property name="spacing">8</property>
+        <property name="margin-bottom">8</property>
+        <property name="margin-top">2</property>
         <child>
           <object class="GtkButton" id="play_button">
             <property name="icon-name">media-playback-start-symbolic</property>
@@ -125,40 +169,8 @@
             <property name="tooltip-text" translatable="yes">Add to queue</property>
             <style>
               <class name="circular"/>
+              <class name="flat"/>
             </style>
-          </object>
-        </child>
-      </object>
-    </child>
-
-    <!-- Per-tile volume -->
-    <child>
-      <object class="GtkBox">
-        <property name="orientation">horizontal</property>
-        <property name="spacing">6</property>
-        <property name="margin-start">12</property>
-        <property name="margin-end">12</property>
-        <property name="margin-bottom">10</property>
-        <child>
-          <object class="GtkImage">
-            <property name="icon-name">audio-volume-medium-symbolic</property>
-            <style>
-              <class name="dim-label"/>
-            </style>
-          </object>
-        </child>
-        <child>
-          <object class="GtkScale" id="volume_scale">
-            <property name="hexpand">true</property>
-            <property name="draw-value">false</property>
-            <property name="adjustment">
-              <object class="GtkAdjustment">
-                <property name="lower">0</property>
-                <property name="upper">100</property>
-                <property name="value">100</property>
-                <property name="step-increment">1</property>
-              </object>
-            </property>
           </object>
         </child>
       </object>

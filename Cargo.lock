@@ -1537,6 +1537,7 @@ name = "resonate"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "dbus",
  "env_logger",
  "glib-build-tools",
  "gtk4",

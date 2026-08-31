@@ -1,6 +1,7 @@
 mod application;
 mod audio;
 mod config;
+mod hotkeys;
 mod plugins;
 mod tray;
 mod ui;

@@ -87,6 +87,7 @@ mod imp {
                     engine.set_monitor_volume(cfg.monitor_volume);
                     engine.set_monitor_enabled(cfg.monitor_enabled);
                     engine.set_mic_volume(cfg.mic_volume);
+                    engine.set_soundboard_mic_volume(cfg.soundboard_mic_volume);
                     *self.audio_engine.borrow_mut() = Some(engine);
                 }
                 Err(e) => log::error!("Audio engine init failed: {}", e),
@@ -161,6 +162,71 @@ mod imp {
                 }
             ));
 
+            // Global hotkeys via the GlobalShortcuts portal. Digits accumulate
+            // into a tile number (Ctrl+Alt+5 then 6 → tile 56) committed after a
+            // short pause; Numpad Enter stops everything.
+            let hk_rx = crate::hotkeys::spawn();
+            let pending_digits: std::rc::Rc<RefCell<String>> =
+                std::rc::Rc::new(RefCell::new(String::new()));
+            let commit_source: std::rc::Rc<RefCell<Option<glib::SourceId>>> =
+                std::rc::Rc::new(RefCell::new(None));
+            glib::timeout_add_local(
+                std::time::Duration::from_millis(100),
+                glib::clone!(
+                    #[weak]
+                    win,
+                    #[upgrade_or]
+                    glib::ControlFlow::Break,
+                    move || {
+                        while let Ok(ev) = hk_rx.try_recv() {
+                            match ev {
+                                crate::hotkeys::HotkeyEvent::StopAll => {
+                                    pending_digits.borrow_mut().clear();
+                                    if let Some(id) = commit_source.borrow_mut().take() {
+                                        id.remove();
+                                    }
+                                    win.stop_all_playback();
+                                }
+                                crate::hotkeys::HotkeyEvent::Digit(d) => {
+                                    pending_digits.borrow_mut().push((b'0' + d) as char);
+                                    // Restart the commit timer on every digit.
+                                    if let Some(id) = commit_source.borrow_mut().take() {
+                                        id.remove();
+                                    }
+                                    let digits = pending_digits.clone();
+                                    let source = commit_source.clone();
+                                    let id = glib::timeout_add_local_once(
+                                        std::time::Duration::from_millis(600),
+                                        glib::clone!(
+                                            #[weak]
+                                            win,
+                                            move || {
+                                                *source.borrow_mut() = None;
+                                                let number =
+                                                    std::mem::take(&mut *digits.borrow_mut());
+                                                if let Ok(n) = number.parse::<usize>() {
+                                                    if n >= 1 {
+                                                        if let Some((path, volume)) = win
+                                                            .imp()
+                                                            .soundboard_page
+                                                            .sound_at_index(n - 1)
+                                                        {
+                                                            win.trigger_play(&path, volume, false);
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        ),
+                                    );
+                                    *commit_source.borrow_mut() = Some(id);
+                                }
+                            }
+                        }
+                        glib::ControlFlow::Continue
+                    }
+                ),
+            );
+
             // Tray indicator (SNI). Tray clicks arrive off the GTK thread; poll
             // the channel on the main loop and act here.
             let rx = crate::tray::spawn();
@@ -231,8 +297,7 @@ impl ResonateWindow {
         // Set slider positions from config
         {
             let cfg = self.imp().config.borrow().clone();
-            page.set_initial_volumes(cfg.mic_volume, cfg.monitor_volume);
-            page.set_default_volume(cfg.default_volume as f64);
+            page.set_initial_volumes(cfg.mic_volume, cfg.monitor_volume, cfg.soundboard_mic_volume);
         }
 
         // Mic / virtual device volume slider
@@ -261,30 +326,95 @@ impl ResonateWindow {
             }
         ));
 
+        // Soundboard → virtual mic level (how loud sounds are for others)
+        page.connect_soundboard_volume_changed(glib::clone!(
+            #[weak(rename_to = win)]
+            self,
+            move |v| {
+                win.imp().config.borrow_mut().soundboard_mic_volume = v;
+                win.imp().config.borrow().save();
+                if let Some(engine) = win.imp().audio_engine.borrow_mut().as_mut() {
+                    engine.set_soundboard_mic_volume(v);
+                }
+            }
+        ));
+
         // Play button on tile → polyphonic/sequential start
         page.set_play_callback(glib::clone!(
             #[weak(rename_to = win)]
             self,
-            move |path, volume| {
-                let name = path.file_stem().and_then(|s| s.to_str()).unwrap_or("Sound").to_string();
-                if let Some(engine) = win.imp().audio_engine.borrow_mut().as_mut() {
-                    if let Err(e) = engine.play(&path, &name, volume) {
-                        log::error!("Playback failed: {}", e);
-                    }
-                }
-            }
+            move |path, volume| win.trigger_play(&path, volume, false)
         ));
 
         // Cue button → always queue regardless of polyphonic mode
         page.set_cue_callback(glib::clone!(
             #[weak(rename_to = win)]
             self,
-            move |path, volume| {
-                let name = path.file_stem().and_then(|s| s.to_str()).unwrap_or("Sound").to_string();
-                if let Some(engine) = win.imp().audio_engine.borrow_mut().as_mut() {
-                    engine.cue(&path, &name, volume);
+            move |path, volume| win.trigger_play(&path, volume, true)
+        ));
+
+        // Preview button (bottom-left): monitor-only playback of the selected
+        // sound from its one-shot scrub point (or persistent marker).
+        page.connect_preview(glib::clone!(
+            #[weak(rename_to = win)]
+            self,
+            move || win.toggle_lcd_preview()
+        ));
+
+        // LCD waveform scrub finished: if a preview runs, chase the new point.
+        page.set_scrub_callback(glib::clone!(
+            #[weak(rename_to = win)]
+            self,
+            move |path, secs| {
+                let previewing = win
+                    .imp()
+                    .audio_engine
+                    .borrow_mut()
+                    .as_mut()
+                    .and_then(|e| e.preview_position())
+                    .is_some();
+                if previewing {
+                    let params = win.preview_params_for(&path, Some(secs));
+                    if let Some(engine) = win.imp().audio_engine.borrow_mut().as_mut() {
+                        if let Err(e) = engine.preview(&path, params) {
+                            log::warn!("Preview failed: {e}");
+                        }
+                    }
                 }
             }
+        ));
+
+        // Tile drag-reorder → persist the new order.
+        page.set_reorder_callback(glib::clone!(
+            #[weak(rename_to = win)]
+            self,
+            move |order| {
+                win.imp().config.borrow_mut().sound_order = order;
+                win.imp().config.borrow().save();
+            }
+        ));
+
+        // Per-tile volume slider → persist + live-apply to playing instances
+        page.set_volume_callback(glib::clone!(
+            #[weak(rename_to = win)]
+            self,
+            move |path, fraction| {
+                {
+                    let mut cfg = win.imp().config.borrow_mut();
+                    cfg.sound_settings_mut(&path).volume = fraction;
+                }
+                win.imp().config.borrow().save();
+                if let Some(engine) = win.imp().audio_engine.borrow_mut().as_mut() {
+                    engine.set_sound_volume(&path, fraction);
+                }
+            }
+        ));
+
+        // Edit… menu item → waveform editor dialog
+        page.set_edit_callback(glib::clone!(
+            #[weak(rename_to = win)]
+            self,
+            move |path| win.open_sound_editor(path)
         ));
 
         // Rename / Remove callbacks
@@ -304,24 +434,39 @@ impl ResonateWindow {
         page.connect_stop_all(glib::clone!(
             #[weak(rename_to = win)]
             self,
-            move || {
-                if let Some(engine) = win.imp().audio_engine.borrow_mut().as_mut() {
-                    engine.stop_all();
-                }
-                let sb = win.imp().soundboard_page.get();
-                sb.update_playback_display(&[], &[]);
-                sb.set_play_pause_sensitive(false);
-                sb.set_play_pause_icon(false);
-            }
+            move || win.stop_all_playback()
         ));
 
-        // Play/pause toggle in bar
+        // Play/pause: starts the selected sound when idle, else pause/resume.
         page.connect_play_pause(glib::clone!(
             #[weak(rename_to = win)]
             self,
             move || {
+                let playing = win
+                    .imp()
+                    .audio_engine
+                    .borrow()
+                    .as_ref()
+                    .map(|e| e.is_anything_playing())
+                    .unwrap_or(false);
+                if playing {
+                    if let Some(engine) = win.imp().audio_engine.borrow_mut().as_mut() {
+                        engine.toggle_pause();
+                    }
+                } else if let Some(path) = win.imp().soundboard_page.selected_path() {
+                    let volume = win.imp().config.borrow().sound_settings(&path).volume;
+                    win.trigger_play(&path, volume, false);
+                }
+            }
+        ));
+
+        // Progress-bar scrub while playing → seek.
+        page.set_seek_callback(glib::clone!(
+            #[weak(rename_to = win)]
+            self,
+            move |frac| {
                 if let Some(engine) = win.imp().audio_engine.borrow_mut().as_mut() {
-                    engine.toggle_pause();
+                    engine.seek_playing(frac);
                 }
             }
         ));
@@ -346,17 +491,23 @@ impl ResonateWindow {
                 #[upgrade_or]
                 glib::ControlFlow::Break,
                 move || {
-                    let (playing, queue) = {
+                    let (playing, queue, preview_pos, mic_level, scope) = {
                         if let Some(engine) = win.imp().audio_engine.borrow_mut().as_mut() {
-                            engine.tick()
+                            let (p, q) = engine.tick();
+                            (p, q, engine.preview_position(), engine.mic_level(), engine.scope())
                         } else {
-                            (vec![], vec![])
+                            (vec![], vec![], None, 0.0, vec![])
                         }
                     };
 
                     let sb = win.imp().soundboard_page.get();
                     sb.update_playback_display(&playing, &queue);
-                    sb.set_play_pause_sensitive(!playing.is_empty());
+                    // Play also starts the selected sound, so selection alone enables it.
+                    sb.set_play_pause_sensitive(!playing.is_empty() || sb.selected_path().is_some());
+                    sb.set_preview_pos(preview_pos);
+                    sb.set_preview_active(preview_pos.is_some());
+                    sb.set_scope(&scope);
+                    win.imp().effects_page.set_mic_level(mic_level);
 
                     let active = win
                         .imp()
@@ -371,6 +522,152 @@ impl ResonateWindow {
                 }
             ),
         );
+    }
+
+    /// Start offset (secs) for the next play of `path`, honouring the start
+    /// mode. A legacy "just once" marker is consumed here and reverts to Off.
+    fn take_start_point(&self, path: &std::path::Path) -> f32 {
+        use crate::config::StartMode;
+        let (start, consumed) = {
+            let cfg = self.imp().config.borrow();
+            let s = cfg.sound_settings(path);
+            (s.effective_start(), s.start_mode == StartMode::Once)
+        };
+        if consumed {
+            self.imp().config.borrow_mut().sound_settings_mut(path).start_mode = StartMode::Off;
+            self.imp().config.borrow().save();
+        }
+        start
+    }
+
+    /// Full playback shape for `path`: LCD one-shot scrub wins over the
+    /// persistent marker; trim + fades come from the saved settings.
+    fn play_params_for(&self, path: &std::path::Path, volume: f32) -> crate::audio::engine::PlayParams {
+        let s = self.imp().config.borrow().sound_settings(path);
+        let start = self
+            .imp()
+            .soundboard_page
+            .consume_one_shot(path)
+            .unwrap_or_else(|| self.take_start_point(path));
+        crate::audio::engine::PlayParams {
+            volume,
+            start_secs: start,
+            end_secs: s.end_secs,
+            fade_in_ms: s.fade_in_ms,
+            fade_out_ms: s.fade_out_ms,
+        }
+    }
+
+    /// Like `play_params_for` but non-consuming (previews must not eat the
+    /// one-shot marker). `start_override` takes precedence when given.
+    fn preview_params_for(&self, path: &std::path::Path, start_override: Option<f32>) -> crate::audio::engine::PlayParams {
+        let s = self.imp().config.borrow().sound_settings(path);
+        let start = start_override
+            .or_else(|| self.imp().soundboard_page.peek_one_shot(path))
+            .unwrap_or_else(|| s.effective_start());
+        crate::audio::engine::PlayParams {
+            volume: s.volume,
+            start_secs: start,
+            end_secs: s.end_secs,
+            fade_in_ms: s.fade_in_ms,
+            fade_out_ms: s.fade_out_ms,
+        }
+    }
+
+    /// Play or cue a sound with its full playback shape (tiles + hotkeys).
+    fn trigger_play(&self, path: &std::path::Path, volume: f32, cue: bool) {
+        let name = path.file_stem().and_then(|s| s.to_str()).unwrap_or("Sound").to_string();
+        let params = self.play_params_for(path, volume);
+        if let Some(engine) = self.imp().audio_engine.borrow_mut().as_mut() {
+            if cue {
+                engine.cue(path, &name, params);
+            } else if let Err(e) = engine.play(path, &name, params) {
+                log::error!("Playback failed: {}", e);
+            }
+        }
+    }
+
+    /// Stop everything (Stop button and the global stop hotkey).
+    fn stop_all_playback(&self) {
+        if let Some(engine) = self.imp().audio_engine.borrow_mut().as_mut() {
+            engine.stop_all();
+        }
+        let sb = self.imp().soundboard_page.get();
+        sb.update_playback_display(&[], &[]);
+        sb.set_play_pause_sensitive(sb.selected_path().is_some());
+        sb.set_play_pause_icon(false);
+    }
+
+    /// Toggle the LCD preview of the selected sound (monitor only).
+    fn toggle_lcd_preview(&self) {
+        let Some(path) = self.imp().soundboard_page.selected_path() else { return };
+        let previewing = self
+            .imp()
+            .audio_engine
+            .borrow_mut()
+            .as_mut()
+            .and_then(|e| e.preview_position())
+            .is_some();
+        if previewing {
+            if let Some(engine) = self.imp().audio_engine.borrow_mut().as_mut() {
+                engine.stop_preview();
+            }
+        } else {
+            let params = self.preview_params_for(&path, None);
+            if let Some(engine) = self.imp().audio_engine.borrow_mut().as_mut() {
+                if let Err(e) = engine.preview(&path, params) {
+                    log::warn!("Preview failed: {e}");
+                }
+            }
+        }
+    }
+
+    /// Present the waveform editor for a sound (scrub, start marker, preview).
+    fn open_sound_editor(&self, path: PathBuf) {
+        use crate::ui::sound_editor::{self, EditorHooks};
+
+        let initial = self.imp().config.borrow().sound_settings(&path);
+        let w1 = self.downgrade();
+        let w2 = self.downgrade();
+        let w3 = self.downgrade();
+        let w4 = self.downgrade();
+
+        let hooks = EditorHooks {
+            preview: Box::new(move |p, params| {
+                let Some(win) = w1.upgrade() else { return };
+                if let Some(engine) = win.imp().audio_engine.borrow_mut().as_mut() {
+                    if let Err(e) = engine.preview(p, params) {
+                        log::warn!("Preview failed: {e}");
+                    }
+                }
+            }),
+            stop_preview: Box::new(move || {
+                let Some(win) = w2.upgrade() else { return };
+                if let Some(engine) = win.imp().audio_engine.borrow_mut().as_mut() {
+                    engine.stop_preview();
+                }
+            }),
+            preview_pos: Box::new(move || {
+                let win = w3.upgrade()?;
+                let mut engine = win.imp().audio_engine.borrow_mut();
+                engine.as_mut()?.preview_position()
+            }),
+            save: Box::new(move |p, settings| {
+                let Some(win) = w4.upgrade() else { return };
+                let volume = settings.volume;
+                {
+                    let mut cfg = win.imp().config.borrow_mut();
+                    *cfg.sound_settings_mut(p) = settings;
+                }
+                win.imp().config.borrow().save();
+                if let Some(engine) = win.imp().audio_engine.borrow_mut().as_mut() {
+                    engine.set_sound_volume(p, volume);
+                }
+                win.imp().soundboard_page.set_tile_volume(&p.to_path_buf(), volume);
+            }),
+        };
+
+        sound_editor::present(self, path, initial, hooks);
     }
 
     // ── File picker ──────────────────────────────────────────────────────────
@@ -452,7 +749,44 @@ impl ResonateWindow {
         } else {
             path
         };
-        self.imp().soundboard_page.add_sound_from_path(final_path);
+        let volume = config.sound_settings(&final_path).volume;
+        let is_new = !config
+            .sounds
+            .contains_key(&crate::config::Config::sound_key(&final_path));
+        self.imp()
+            .soundboard_page
+            .add_sound_from_path(final_path.clone(), volume);
+        if is_new {
+            self.normalize_new_sound(final_path);
+        }
+    }
+
+    /// Peak-normalise a freshly imported sound: analyse in the background and
+    /// pre-set its volume so its peak lands near -1 dBFS (only ever turning
+    /// loud files down — the per-sound gain cannot exceed 1.0).
+    fn normalize_new_sound(&self, path: PathBuf) {
+        let slot = crate::audio::wave::load_async(&path);
+        let win_weak = self.downgrade();
+        glib::timeout_add_local(std::time::Duration::from_millis(150), move || {
+            let Some(win) = win_weak.upgrade() else {
+                return glib::ControlFlow::Break;
+            };
+            let ready = slot.lock().ok().and_then(|mut g| g.take());
+            if let Some(wave) = ready {
+                if wave.peak > 0.0 {
+                    let target = 0.89f32; // ≈ -1 dBFS
+                    let vol = (target / wave.peak).clamp(0.0, 1.0);
+                    win.imp().config.borrow_mut().sound_settings_mut(&path).volume = vol;
+                    win.imp().config.borrow().save();
+                    win.imp().soundboard_page.set_tile_volume(&path, vol);
+                    if let Some(engine) = win.imp().audio_engine.borrow_mut().as_mut() {
+                        engine.set_sound_volume(&path, vol);
+                    }
+                }
+                return glib::ControlFlow::Break;
+            }
+            glib::ControlFlow::Continue
+        });
     }
 
     fn scan_sounds_folder(&self) {
@@ -466,8 +800,17 @@ impl ResonateWindow {
             .filter(|p| p.is_file() && is_audio_file(p))
             .collect();
         paths.sort();
+        // Apply the saved tile order; files not in it keep alphabetical order
+        // after the ordered ones.
+        let order = self.imp().config.borrow().sound_order.clone();
+        let rank = |p: &PathBuf| {
+            let key = crate::config::Config::sound_key(p);
+            order.iter().position(|k| *k == key).unwrap_or(usize::MAX)
+        };
+        paths.sort_by_key(|p| (rank(p), p.clone()));
         for path in paths {
-            self.imp().soundboard_page.add_sound_from_path(path);
+            let volume = self.imp().config.borrow().sound_settings(&path).volume;
+            self.imp().soundboard_page.add_sound_from_path(path, volume);
         }
     }
 
@@ -562,6 +905,10 @@ impl ResonateWindow {
             return;
         }
 
+        // Carry the sound's saved volume/start settings to the new file name.
+        self.imp().config.borrow_mut().rename_sound_key(&old_path, &new_path);
+        self.imp().config.borrow().save();
+
         self.imp()
             .soundboard_page
             .rename_sound_by_path(&old_path, new_name.clone(), new_path);
@@ -648,17 +995,26 @@ impl ResonateWindow {
                     || (std::fs::copy(&temp_restore, &path_restore).is_ok()
                         && { let _ = std::fs::remove_file(&temp_restore); true });
                 if restored {
-                    win.imp().soundboard_page.add_sound_from_path(path_restore.clone());
+                    let volume = win.imp().config.borrow().sound_settings(&path_restore).volume;
+                    win.imp().soundboard_page.add_sound_from_path(path_restore.clone(), volume);
                 }
             }
         ));
 
         let temp_for_dismiss = temp_path.clone();
-        toast.connect_dismissed(move |_| {
-            if temp_for_dismiss.exists() {
-                let _ = std::fs::remove_file(&temp_for_dismiss);
+        let path_for_dismiss = path.clone();
+        toast.connect_dismissed(glib::clone!(
+            #[weak(rename_to = win)]
+            self,
+            move |_| {
+                if temp_for_dismiss.exists() {
+                    // Deletion became permanent — drop the saved settings too.
+                    let _ = std::fs::remove_file(&temp_for_dismiss);
+                    win.imp().config.borrow_mut().remove_sound_settings(&path_for_dismiss);
+                    win.imp().config.borrow().save();
+                }
             }
-        });
+        ));
 
         self.imp().toast_overlay.add_toast(toast);
     }
@@ -748,6 +1104,73 @@ impl ResonateWindow {
                 win.rebuild_and_refresh_effects();
             }
         ));
+
+        // Reorder an effect (up/down arrows).
+        page.connect_effect_move(glib::clone!(
+            #[weak(rename_to = win)]
+            self,
+            move |idx, up| {
+                {
+                    let mut cfg = win.imp().config.borrow_mut();
+                    let len = cfg.effects_chain.len();
+                    let target = if up { idx.checked_sub(1) } else { Some(idx + 1) };
+                    match target {
+                        Some(t) if idx < len && t < len => cfg.effects_chain.swap(idx, t),
+                        _ => return,
+                    }
+                }
+                win.rebuild_and_refresh_effects();
+            }
+        ));
+
+        // Presets: save/load/delete named chains.
+        self.refresh_preset_list();
+        page.connect_preset_save(glib::clone!(
+            #[weak(rename_to = win)]
+            self,
+            move |name| {
+                {
+                    let mut cfg = win.imp().config.borrow_mut();
+                    let chain = cfg.effects_chain.clone();
+                    cfg.effect_presets.insert(name, chain);
+                }
+                win.imp().config.borrow().save();
+                win.refresh_preset_list();
+            }
+        ));
+        page.connect_preset_load(glib::clone!(
+            #[weak(rename_to = win)]
+            self,
+            move |name| {
+                let chain = win.imp().config.borrow().effect_presets.get(&name).cloned();
+                if let Some(chain) = chain {
+                    win.imp().config.borrow_mut().effects_chain = chain;
+                    win.rebuild_and_refresh_effects();
+                }
+            }
+        ));
+        page.connect_preset_delete(glib::clone!(
+            #[weak(rename_to = win)]
+            self,
+            move |name| {
+                win.imp().config.borrow_mut().effect_presets.remove(&name);
+                win.imp().config.borrow().save();
+                win.refresh_preset_list();
+            }
+        ));
+    }
+
+    fn refresh_preset_list(&self) {
+        let mut names: Vec<String> = self
+            .imp()
+            .config
+            .borrow()
+            .effect_presets
+            .keys()
+            .cloned()
+            .collect();
+        names.sort();
+        self.imp().effects_page.set_presets(&names);
     }
 
     /// Persist the chain, rebuild the live engine chain, and refresh the rows.
@@ -849,7 +1272,6 @@ impl ResonateWindow {
                 let v = row.value();
                 win.imp().config.borrow_mut().default_volume = v as u32;
                 win.imp().config.borrow().save();
-                win.imp().soundboard_page.set_default_volume(v);
             }
         ));
 
@@ -980,6 +1402,7 @@ fn default_entry_for(id: &str) -> crate::config::EffectEntry {
     match id {
         "gain" => EffectEntry::gain(1.0, true),
         "gate" => EffectEntry::gate(0.02, 10.0, 100.0, true),
+        // Other built-ins start from their plugin defaults with no overrides.
         other => EffectEntry {
             id: other.to_string(),
             enabled: true,

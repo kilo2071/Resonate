@@ -21,6 +21,8 @@ mod imp {
         #[template_child]
         pub menu_button: TemplateChild<gtk::MenuButton>,
         #[template_child]
+        pub edit_button: TemplateChild<gtk::Button>,
+        #[template_child]
         pub rename_button: TemplateChild<gtk::Button>,
         #[template_child]
         pub remove_button: TemplateChild<gtk::Button>,
@@ -74,6 +76,26 @@ impl ResonateSoundTile {
 
     pub fn connect_cue<F: Fn() + 'static>(&self, f: F) {
         self.imp().cue_button.connect_clicked(move |_| f());
+    }
+
+    pub fn connect_edit<F: Fn() + 'static>(&self, f: F) {
+        self.imp().edit_button.connect_clicked(glib::clone!(
+            #[weak(rename_to = tile)]
+            self,
+            move |_| {
+                if let Some(p) = tile.imp().menu_button.popover() {
+                    p.popdown();
+                }
+                f();
+            }
+        ));
+    }
+
+    /// Fires as the popover volume slider moves; value is the 0.0–1.0 fraction.
+    pub fn connect_volume_changed<F: Fn(f32) + 'static>(&self, f: F) {
+        self.imp()
+            .volume_scale
+            .connect_value_changed(move |s| f((s.value() / 100.0) as f32));
     }
 
     pub fn connect_rename<F: Fn() + 'static>(&self, f: F) {

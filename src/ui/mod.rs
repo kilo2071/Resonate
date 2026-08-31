@@ -1,5 +1,6 @@
 pub mod effects_page;
 pub mod settings_page;
+pub mod sound_editor;
 pub mod sound_tile;
 pub mod soundboard_page;
 

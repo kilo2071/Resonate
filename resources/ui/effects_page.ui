@@ -35,6 +35,58 @@
                       </object>
                     </child>
                     <child>
+                      <object class="GtkMenuButton" id="presets_button">
+                        <property name="icon-name">document-save-symbolic</property>
+                        <property name="tooltip-text" translatable="yes">Effect presets</property>
+                        <style>
+                          <class name="circular"/>
+                          <class name="flat"/>
+                        </style>
+                        <property name="popover">
+                          <object class="GtkPopover">
+                            <property name="child">
+                              <object class="GtkBox">
+                                <property name="orientation">vertical</property>
+                                <property name="spacing">6</property>
+                                <property name="margin-top">8</property>
+                                <property name="margin-bottom">8</property>
+                                <property name="margin-start">8</property>
+                                <property name="margin-end">8</property>
+                                <child>
+                                  <object class="GtkBox" id="presets_box">
+                                    <property name="orientation">vertical</property>
+                                    <property name="spacing">2</property>
+                                  </object>
+                                </child>
+                                <child>
+                                  <object class="GtkSeparator"/>
+                                </child>
+                                <child>
+                                  <object class="GtkBox">
+                                    <property name="orientation">horizontal</property>
+                                    <property name="spacing">6</property>
+                                    <child>
+                                      <object class="GtkEntry" id="preset_name_entry">
+                                        <property name="placeholder-text" translatable="yes">Preset name…</property>
+                                        <property name="hexpand">true</property>
+                                      </object>
+                                    </child>
+                                    <child>
+                                      <object class="GtkButton" id="preset_save_button">
+                                        <property name="icon-name">document-save-symbolic</property>
+                                        <property name="tooltip-text" translatable="yes">Save current chain as preset</property>
+                                        <style><class name="flat"/></style>
+                                      </object>
+                                    </child>
+                                  </object>
+                                </child>
+                              </object>
+                            </property>
+                          </object>
+                        </property>
+                      </object>
+                    </child>
+                    <child>
                       <object class="GtkButton" id="add_effect_button">
                         <property name="icon-name">list-add-symbolic</property>
                         <property name="tooltip-text" translatable="yes">Add Effect</property>
@@ -59,6 +111,17 @@
                       <class name="caption"/>
                       <class name="dim-label"/>
                     </style>
+                  </object>
+                </child>
+                <!-- Post-effects mic level meter -->
+                <child>
+                  <object class="GtkLevelBar" id="mic_level_bar">
+                    <property name="min-value">0</property>
+                    <property name="max-value">1</property>
+                    <property name="margin-start">16</property>
+                    <property name="margin-end">16</property>
+                    <property name="margin-bottom">8</property>
+                    <property name="tooltip-text" translatable="yes">Mic level after effects</property>
                   </object>
                 </child>
                 <!-- Chain list -->

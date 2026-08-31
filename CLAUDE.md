@@ -36,7 +36,8 @@ Config stored at: `~/.config/io.github.kilo2071.Resonate/config.json`
 - Installed LV2 plugins are hosted via the `livi` crate (links `lilv`) in `src/plugins/lv2.rs`, wrapped behind the same `ResonatePlugin` trait. A single process-global `Lv2Host` owns the `livi::World` for the program lifetime (lilv instances don't keep the world alive).
 - The chain runs in-process on the PipeWire **mic capture** callback (`src/audio/virtual_device.rs`): physical mic → `PluginChain::process` → Resonate sink. The chain is `Arc<Mutex<PluginChain>>`, shared with the UI thread (`try_lock` in the RT callback).
 - Chain is serialised to `config.json` as `effects_chain: Vec<EffectEntry>`. Built-in entries use ids `gain`/`gate`; LV2 entries use id `lv2:<uri>` with control values keyed by port symbol.
-- The effects page builds parameter sliders generically from `ResonatePlugin::params()`, so LV2 plugins get controls automatically; the "Add effect" sheet lists built-ins + `lv2::discover()`.
+- The effects page builds parameter sliders generically from `ResonatePlugin::params()`, so LV2 plugins get controls automatically; the "Add effect" sheet lists built-ins, then curated LV2 plugins (`CURATED_LV2` — friendly names for the same LSP/RNNoise plugins Easy Effects wraps), then the rest of `lv2::discover()`.
+- The `easyeffects/` directory is a reference clone of Easy Effects — **never built or linked**. EE's effects are thin wrappers around Calf/LSP LV2 plugins; Resonate follows the same approach through its own `livi` host. Calf's LV2 bundle is not packaged on Fedora, so the fun effects (distortion, bitcrush, telephone) are native built-ins instead.
 
 ## Key Dependencies
 
@@ -72,25 +73,38 @@ resonate/
 │   ├── application.rs              # AdwApplication subclass; single-instance activate, --hidden
 │   ├── window.rs                   # AdwApplicationWindow + wiring; close-to-background, tray poll, autostart
 │   ├── tray.rs                     # StatusNotifierItem tray (ksni); TrayCmd channel → GTK
+│   ├── hotkeys.rs                  # global hotkeys (GlobalShortcuts portal, blocking dbus crate
+│   │                               #   on own thread; mpsc → GTK poll). Ctrl+Alt+KP digits type a
+│   │                               #   tile number (56 → tile 56, committed 600ms after the last
+│   │                               #   digit, accumulation in window.rs); Ctrl+Alt+KP_Enter stops
+│   │                               #   all. Moves process into app-gnome-<APP_ID>-<pid>.scope
+│   │                               #   (and waits for the cgroup move) so the portal accepts us
+│   │                               #   when launched from a shell)
 │   ├── config.rs                   # Config, EffectEntry (serde_json)
 │   ├── audio/
 │   │   ├── mod.rs
 │   │   ├── engine.rs               # rodio Sink mgmt, tick loop, PCM decode, shared FX chain
 │   │   ├── virtual_device.rs       # in-process PipeWire streams: bridge load, soundboard + mic capture/playback
 │   │   ├── pw_config.rs            # routing plan, mic detection, loopback teardown, drop-in persistence
+│   │   ├── wave.rs                 # shared waveform peaks (editor + LCD), async decode helper
 │   │   └── sampler.rs              # (legacy helper, mostly superseded by engine)
 │   ├── plugins/
-│   │   ├── mod.rs                  # ResonatePlugin trait, PluginParam, plugin_from_entry factory
+│   │   ├── mod.rs                  # ResonatePlugin trait, PluginParam, plugin_from_entry factory,
+│   │   │                           #   BUILTINS + CURATED_LV2 registries (friendly names)
 │   │   ├── host.rs                 # PluginChain (Vec<Box<dyn ResonatePlugin>>)
 │   │   ├── lv2.rs                  # LV2 host (livi): Lv2Host, discover(), Lv2Plugin
 │   │   └── builtin/
 │   │       ├── mod.rs
 │   │       ├── gain.rs             # GainPlugin (0.0–4.0x linear)
-│   │       └── gate.rs             # NoiseGatePlugin (RMS, attack/release counters)
+│   │       ├── gate.rs             # NoiseGatePlugin (RMS, attack/release counters)
+│   │       ├── distortion.rs       # tanh waveshaper (drive/mix/level)
+│   │       ├── bitcrush.rs         # bit depth + sample-and-hold downsampling
+│   │       └── telephone.rs        # RBJ biquad HP+LP bandlimit ("old phone/radio")
 │   └── ui/
 │       ├── mod.rs
 │       ├── soundboard_page.rs      # soundboard grid
-│       ├── sound_tile.rs           # individual tile widget
+│       ├── sound_tile.rs           # compact tile; volume + Edit/Rename/Remove in ⋮ popover
+│       ├── sound_editor.rs         # waveform editor dialog (scrub, start marker, preview)
 │       ├── settings_page.rs        # virtual device / input settings
 │       └── effects_page.rs         # mic effects chain editor
 ├── resources/
@@ -225,11 +239,42 @@ pub struct Config {
     pub monitor_volume: f32,
     pub input_device_name: String,
     pub mic_volume: f32,
+    pub soundboard_mic_volume: f32,        // soundboard level into the virtual mic only
+    pub sounds: HashMap<String, SoundSettings>, // keyed by file name; rename migrates the key
+    pub sound_order: Vec<String>,          // tile order (drag-reorder), file names
+    pub effect_presets: HashMap<String, Vec<EffectEntry>>, // named chain presets
     pub effects_chain: Vec<EffectEntry>,  // default: [gate(disabled), gain(enabled)]
 }
 
+pub struct SoundSettings {
+    pub volume: f32,                       // 0.0–1.0 per-sound gain (monitor + virtual mic)
+    pub start_secs: f32,                   // persistent start marker (editor)
+    pub start_mode: StartMode,             // Off | Every (Once is legacy, consumed on play)
+    pub end_secs: f32,                     // end trim; 0.0 = play to the end
+    pub fade_in_ms: f32,
+    pub fade_out_ms: f32,
+}
+```
+
+The *one-shot* start point is runtime-only: click a tile to select it, then drag
+the LCD **progress bar** while idle to place it; it is consumed by the next play.
+Dragging the progress bar **while playing** seeks (engine rebuilds the monitor
+sink at the target; the display window `PlayingSound::window()` survives seeks so
+the bar mapping stays stable). The LCD `wave_area` is a live **oscilloscope** of
+the playing mix (mono min/max envelope from `engine::scope()`, fed each UI tick;
+sits between the queue list and the time totals). The transport Play button
+starts the selected sound when nothing is playing. The Add Effect sheet lists
+only built-ins + `CURATED_LV2` — the raw lilv catalogue is intentionally not
+shown (chains referencing other LV2 ids still load). The
+editor dialog owns the persistent settings. Playback is shaped by
+`engine::PlayParams` (volume, start, end, fades) on both the monitor (rodio
+`EnvelopeSource`) and virtual-mic PCM paths. New imports are peak-normalised to
+≈ -1 dBFS in the background (gain only ever reduced).
+
+```rust
+
 pub struct EffectEntry {
-    pub id: String,                        // "gain" | "gate" | "lv2:<uri>"
+    pub id: String,                        // "gain" | "gate" | "distortion" | "bitcrush" | "telephone" | "lv2:<uri>"
     pub enabled: bool,
     pub params: HashMap<String, f32>,      // e.g. {"gain": 1.0}, {"threshold": 0.02, ...}
 }

@@ -20,6 +20,8 @@ type EnabledFn = Box<dyn Fn(usize, bool) + 'static>;
 type ParamFn = Box<dyn Fn(usize, String, f32) + 'static>;
 type AddFn = Box<dyn Fn(String) + 'static>;
 type RemoveFn = Box<dyn Fn(usize) + 'static>;
+type MoveFn = Box<dyn Fn(usize, bool) + 'static>;
+type PresetFn = Box<dyn Fn(String) + 'static>;
 type ParamProvider = Box<dyn Fn(usize) -> Vec<PluginParam> + 'static>;
 
 // ── GObject subclass ──────────────────────────────────────────────────────────
@@ -48,6 +50,16 @@ mod imp {
         pub input_source_label: TemplateChild<gtk::Label>,
         #[template_child]
         pub chain_empty_label: TemplateChild<gtk::Label>,
+        #[template_child]
+        pub mic_level_bar: TemplateChild<gtk::LevelBar>,
+        #[template_child]
+        pub presets_button: TemplateChild<gtk::MenuButton>,
+        #[template_child]
+        pub presets_box: TemplateChild<gtk::Box>,
+        #[template_child]
+        pub preset_name_entry: TemplateChild<gtk::Entry>,
+        #[template_child]
+        pub preset_save_button: TemplateChild<gtk::Button>,
 
         // Runtime state
         pub chain: RefCell<Vec<ChainEntry>>,
@@ -56,6 +68,10 @@ mod imp {
         pub param_fn: RefCell<Option<ParamFn>>,
         pub add_fn: RefCell<Option<AddFn>>,
         pub remove_fn: RefCell<Option<RemoveFn>>,
+        pub move_fn: RefCell<Option<MoveFn>>,
+        pub preset_save_fn: RefCell<Option<PresetFn>>,
+        pub preset_load_fn: RefCell<Option<PresetFn>>,
+        pub preset_delete_fn: RefCell<Option<PresetFn>>,
         pub param_provider: RefCell<Option<ParamProvider>>,
         pub available_built: RefCell<bool>,
     }
@@ -72,12 +88,21 @@ mod imp {
                 effect_search_entry: Default::default(),
                 input_source_label: Default::default(),
                 chain_empty_label: Default::default(),
+                mic_level_bar: Default::default(),
+                presets_button: Default::default(),
+                presets_box: Default::default(),
+                preset_name_entry: Default::default(),
+                preset_save_button: Default::default(),
                 chain: RefCell::new(Vec::new()),
                 selected_idx: RefCell::new(None),
                 enabled_fn: RefCell::new(None),
                 param_fn: RefCell::new(None),
                 add_fn: RefCell::new(None),
                 remove_fn: RefCell::new(None),
+                move_fn: RefCell::new(None),
+                preset_save_fn: RefCell::new(None),
+                preset_load_fn: RefCell::new(None),
+                preset_delete_fn: RefCell::new(None),
                 param_provider: RefCell::new(None),
                 available_built: RefCell::new(false),
             }
@@ -107,6 +132,22 @@ mod imp {
             self.add_effect_button.connect_clicked(move |_| {
                 sheet.set_open(true);
             });
+
+            // Save-preset button: pass the typed name up and clear the entry.
+            self.preset_save_button.connect_clicked(glib::clone!(
+                #[weak(rename_to = imp)]
+                self,
+                move |_| {
+                    let name = imp.preset_name_entry.text().trim().to_string();
+                    if name.is_empty() {
+                        return;
+                    }
+                    imp.preset_name_entry.set_text("");
+                    if let Some(f) = imp.preset_save_fn.borrow().as_ref() {
+                        f(name);
+                    }
+                }
+            ));
 
             self.obj().update_empty_label();
         }
@@ -172,6 +213,98 @@ impl ResonateEffectsPage {
         *self.imp().remove_fn.borrow_mut() = Some(Box::new(f));
     }
 
+    /// Fired by the per-row arrows: (index, up).
+    pub fn connect_effect_move<F: Fn(usize, bool) + 'static>(&self, f: F) {
+        *self.imp().move_fn.borrow_mut() = Some(Box::new(f));
+    }
+
+    pub fn connect_preset_save<F: Fn(String) + 'static>(&self, f: F) {
+        *self.imp().preset_save_fn.borrow_mut() = Some(Box::new(f));
+    }
+
+    pub fn connect_preset_load<F: Fn(String) + 'static>(&self, f: F) {
+        *self.imp().preset_load_fn.borrow_mut() = Some(Box::new(f));
+    }
+
+    pub fn connect_preset_delete<F: Fn(String) + 'static>(&self, f: F) {
+        *self.imp().preset_delete_fn.borrow_mut() = Some(Box::new(f));
+    }
+
+    /// Post-effects mic RMS → level bar, mapped as dB with a -60 dB floor so
+    /// quiet speech is still visible.
+    pub fn set_mic_level(&self, rms: f32) {
+        let value = if rms > 0.0 {
+            (1.0 + 20.0 * rms.log10() / 60.0).clamp(0.0, 1.0)
+        } else {
+            0.0
+        };
+        self.imp().mic_level_bar.set_value(value as f64);
+    }
+
+    /// Rebuild the presets popover list.
+    pub fn set_presets(&self, names: &[String]) {
+        let container = &self.imp().presets_box;
+        while let Some(child) = container.first_child() {
+            container.remove(&child);
+        }
+        if names.is_empty() {
+            let label = gtk::Label::builder()
+                .label("No presets saved yet")
+                .css_classes(["dim-label", "caption"])
+                .margin_top(4)
+                .margin_bottom(4)
+                .build();
+            container.append(&label);
+            return;
+        }
+        for name in names {
+            let row = gtk::Box::builder()
+                .orientation(gtk::Orientation::Horizontal)
+                .spacing(4)
+                .build();
+            let load_btn = gtk::Button::builder()
+                .label(name)
+                .hexpand(true)
+                .css_classes(["flat"])
+                .build();
+            {
+                let name = name.clone();
+                load_btn.connect_clicked(glib::clone!(
+                    #[weak(rename_to = page)]
+                    self,
+                    move |_| {
+                        if let Some(p) = page.imp().presets_button.popover() {
+                            p.popdown();
+                        }
+                        if let Some(f) = page.imp().preset_load_fn.borrow().as_ref() {
+                            f(name.clone());
+                        }
+                    }
+                ));
+            }
+            let del_btn = gtk::Button::builder()
+                .icon_name("user-trash-symbolic")
+                .tooltip_text("Delete preset")
+                .css_classes(["flat", "circular"])
+                .build();
+            {
+                let name = name.clone();
+                del_btn.connect_clicked(glib::clone!(
+                    #[weak(rename_to = page)]
+                    self,
+                    move |_| {
+                        if let Some(f) = page.imp().preset_delete_fn.borrow().as_ref() {
+                            f(name.clone());
+                        }
+                    }
+                ));
+            }
+            row.append(&load_btn);
+            row.append(&del_btn);
+            container.append(&row);
+        }
+    }
+
     /// Supplies the live parameter list for the effect at `idx` (queried from the
     /// running chain), so the params panel works for built-ins and LV2 alike.
     pub fn connect_param_provider<F: Fn(usize) -> Vec<PluginParam> + 'static>(&self, f: F) {
@@ -208,6 +341,26 @@ impl ResonateEffectsPage {
             }
         ));
         row.add_prefix(&toggle);
+
+        // Reorder arrows — chain order is audible (gate→distortion ≠ distortion→gate).
+        for (icon, up) in [("go-up-symbolic", true), ("go-down-symbolic", false)] {
+            let btn = gtk::Button::builder()
+                .icon_name(icon)
+                .tooltip_text(if up { "Move up" } else { "Move down" })
+                .valign(gtk::Align::Center)
+                .css_classes(["flat", "circular"])
+                .build();
+            btn.connect_clicked(glib::clone!(
+                #[weak(rename_to = page)]
+                self,
+                move |_| {
+                    if let Some(f) = page.imp().move_fn.borrow().as_ref() {
+                        f(idx, up);
+                    }
+                }
+            ));
+            row.add_suffix(&btn);
+        }
 
         let remove_btn = gtk::Button::builder()
             .icon_name("list-remove-symbolic")
@@ -406,13 +559,20 @@ impl ResonateEffectsPage {
             list.remove(&row);
         }
 
-        // Built-ins first, then installed LV2 plugins.
-        let mut items: Vec<(String, String, String)> = vec![
-            ("gate".into(), "Noise Gate".into(), "Silence audio below a threshold".into()),
-            ("gain".into(), "Gain".into(), "Boost or cut the microphone volume".into()),
-        ];
-        for info in lv2::discover() {
-            items.push((lv2::id_for_uri(&info.uri), info.name, "LV2 plugin".into()));
+        // Built-ins, then curated LV2 (Easy Effects-style friendly names). The
+        // raw lilv catalogue is deliberately NOT listed — 200 uncurated LSP
+        // entries just looked out of place. (Chains referencing other LV2 ids
+        // still load fine; they're only absent from this picker.)
+        let mut items: Vec<(String, String, String)> = crate::plugins::BUILTINS
+            .iter()
+            .map(|(id, name, desc)| (id.to_string(), name.to_string(), desc.to_string()))
+            .collect();
+
+        let discovered = lv2::discover();
+        for (uri, name, desc) in crate::plugins::CURATED_LV2 {
+            if discovered.iter().any(|info| info.uri == *uri) {
+                items.push((lv2::id_for_uri(uri), name.to_string(), desc.to_string()));
+            }
         }
 
         for (id, name, desc) in items {
@@ -475,15 +635,15 @@ impl ResonateEffectsPage {
     }
 }
 
-/// Display name for a chain entry id: built-ins by name, LV2 by plugin name.
+/// Display name for a chain entry id: built-ins/curated by friendly name,
+/// other LV2 by the plugin's own name.
 fn display_name(id: &str) -> String {
-    match id {
-        "gate" => "Noise Gate".to_string(),
-        "gain" => "Gain".to_string(),
-        other => lv2::uri_from_id(other)
-            .and_then(lv2::name_for_uri)
-            .unwrap_or_else(|| other.to_string()),
+    if let Some(name) = crate::plugins::friendly_name(id) {
+        return name.to_string();
     }
+    lv2::uri_from_id(id)
+        .and_then(lv2::name_for_uri)
+        .unwrap_or_else(|| id.to_string())
 }
 
 impl Default for ResonateEffectsPage {

@@ -5,6 +5,16 @@
   <template class="ResonateSoundboardPage" parent="GtkBox">
     <property name="orientation">vertical</property>
 
+    <!-- Search -->
+    <child>
+      <object class="GtkSearchEntry" id="sound_search_entry">
+        <property name="placeholder-text" translatable="yes">Search sounds…</property>
+        <property name="margin-top">6</property>
+        <property name="margin-start">6</property>
+        <property name="margin-end">6</property>
+      </object>
+    </child>
+
     <!-- Content stack: empty-state or sound grid -->
     <child>
       <object class="GtkStack" id="content_stack">
@@ -105,6 +115,17 @@
                 </style>
               </object>
             </child>
+            <child>
+              <object class="GtkButton" id="preview_button">
+                <property name="icon-name">audio-headphones-symbolic</property>
+                <property name="tooltip-text" translatable="yes">Preview selected sound (monitor only)</property>
+                <property name="sensitive">false</property>
+                <style>
+                  <class name="circular"/>
+                  <class name="flat"/>
+                </style>
+              </object>
+            </child>
           </object>
         </child>
 
@@ -157,6 +178,13 @@
                     </child>
                   </object>
                 </child>
+                <!-- Live oscilloscope of the playing mix -->
+                <child>
+                  <object class="GtkDrawingArea" id="wave_area">
+                    <property name="width-request">180</property>
+                    <property name="valign">fill</property>
+                  </object>
+                </child>
                 <!-- Aggregate time totals -->
                 <child>
                   <object class="GtkBox">
@@ -187,10 +215,13 @@
                 </child>
               </object>
             </child>
-            <!-- Progress bar spans full width -->
+            <!-- Progress: shows playback; drag to seek (playing) or set the
+                 one-shot start point (selected sound, idle) -->
             <child>
-              <object class="GtkProgressBar" id="playback_progress">
-                <property name="fraction">0</property>
+              <object class="GtkDrawingArea" id="progress_area">
+                <property name="content-height">14</property>
+                <property name="hexpand">true</property>
+                <property name="tooltip-text" translatable="yes">Drag to scrub; when idle, sets where the selected sound starts next (one-shot)</property>
               </object>
             </child>
           </object>
@@ -252,6 +283,34 @@
                     <property name="width-request">120</property>
                     <property name="draw-value">false</property>
                     <property name="tooltip-text" translatable="yes">Monitor (headphone) volume</property>
+                    <property name="adjustment">
+                      <object class="GtkAdjustment">
+                        <property name="lower">0</property>
+                        <property name="upper">100</property>
+                        <property name="value">100</property>
+                        <property name="step-increment">1</property>
+                      </object>
+                    </property>
+                  </object>
+                </child>
+              </object>
+            </child>
+            <!-- Soundboard level into the virtual mic -->
+            <child>
+              <object class="GtkBox">
+                <property name="orientation">horizontal</property>
+                <property name="spacing">6</property>
+                <child>
+                  <object class="GtkImage">
+                    <property name="icon-name">emblem-music-symbolic</property>
+                    <property name="tooltip-text" translatable="yes">Soundboard level in the virtual mic</property>
+                  </object>
+                </child>
+                <child>
+                  <object class="GtkScale" id="soundboard_volume_scale">
+                    <property name="width-request">120</property>
+                    <property name="draw-value">false</property>
+                    <property name="tooltip-text" translatable="yes">How loud sounds are for others (virtual mic)</property>
                     <property name="adjustment">
                       <object class="GtkAdjustment">
                         <property name="lower">0</property>
