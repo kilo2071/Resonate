@@ -54,9 +54,20 @@ glib::wrapper! {
 
 impl ResonateApplication {
     pub fn new() -> Self {
-        glib::Object::builder()
+        let app: Self = glib::Object::builder()
             .property("application-id", crate::APP_ID)
             .property("flags", gtk::gio::ApplicationFlags::empty())
-            .build()
+            .build();
+        // GApplication rejects unrecognised options before activate() runs, so
+        // --hidden must be registered even though main() reads it from args.
+        app.add_main_option(
+            "hidden",
+            glib::Char::from(0u8),
+            glib::OptionFlags::NONE,
+            glib::OptionArg::None,
+            "Start hidden in the background (used by the autostart entry)",
+            None,
+        );
+        app
     }
 }
