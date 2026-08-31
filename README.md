@@ -157,7 +157,7 @@ src/
   window.rs             — AdwApplicationWindow; audio/effects/hotkey wiring, rename/remove logic
   config.rs             — Config, EffectEntry, per-sound SoundSettings (serde_json)
   hotkeys.rs            — global hotkeys via the GlobalShortcuts portal (blocking dbus)
-  tray.rs               — StatusNotifierItem tray (ksni)
+  tray.rs               — StatusNotifierItem tray (ksni), incl. preset submenu
   audio/
     engine.rs           — rodio polyphonic engine, queue, tick loop, seek, envelope, scope feed
     virtual_device.rs   — in-process PipeWire streams: bridge, soundboard + mic capture/playback

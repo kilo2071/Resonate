@@ -75,7 +75,8 @@ resonate/
 │   ├── main.rs                     # app entry, GApplication setup; APP_ID, START_HIDDEN, --hidden
 │   ├── application.rs              # AdwApplication subclass; single-instance activate, --hidden
 │   ├── window.rs                   # AdwApplicationWindow + wiring; close-to-background, tray poll, autostart
-│   ├── tray.rs                     # StatusNotifierItem tray (ksni); TrayCmd channel → GTK
+│   ├── tray.rs                     # StatusNotifierItem tray (ksni); TrayCmd channel → GTK,
+│   │                               #   TrayHandle/set_presets pushes the preset submenu back
 │   ├── hotkeys.rs                  # global hotkeys (GlobalShortcuts portal, blocking dbus crate
 │   │                               #   on own thread; mpsc → GTK poll). Ctrl+Alt+KP digits type a
 │   │                               #   tile number (56 → tile 56, committed 600ms after the last
@@ -143,6 +144,11 @@ GResource paths use prefix `/io/github/kilo2071/Resonate/`.
   sent as `TrayCmd` over an `mpsc` channel and drained by a 150 ms glib timeout on
   the main thread (no async runtime). Needs the GNOME "AppIndicator/KStatusNotifier"
   extension to be visible.
+  The menu carries an **Effect Preset** submenu (checkmark on the active one);
+  `window.rs` pushes the list in with `tray::set_presets` via the `TrayHandle`
+  returned by `spawn()`, and `TrayCmd::LoadPreset` comes back through the same
+  channel into `apply_preset`. `active_preset` is runtime-only and cleared by any
+  chain edit, so the checkmark never claims a stale preset.
 - **Autostart**: a Settings switch writes/removes
   `~/.config/autostart/<APP_ID>.desktop` with `Exec=<exe> --hidden`. `--hidden`
   sets `START_HIDDEN`, so `activate()` creates the window (effects start) but does

@@ -39,6 +39,11 @@ mod imp {
         pub audio_engine: RefCell<Option<AudioEngine>>,
         /// True once the user chose Quit (vs. just closing → hide to background).
         pub force_quit: Cell<bool>,
+        /// Tray handle, for pushing the preset list into the tray menu.
+        pub tray: RefCell<Option<crate::tray::TrayHandle>>,
+        /// Preset the live chain currently matches; cleared as soon as the chain
+        /// is edited, so the tray checkmark never claims a stale preset.
+        pub active_preset: RefCell<Option<String>>,
     }
 
     impl Default for ResonateWindow {
@@ -52,6 +57,8 @@ mod imp {
                 config: RefCell::new(Config::load()),
                 audio_engine: RefCell::new(None),
                 force_quit: Cell::new(false),
+                tray: RefCell::new(None),
+                active_preset: RefCell::new(None),
             }
         }
     }
@@ -229,7 +236,9 @@ mod imp {
 
             // Tray indicator (SNI). Tray clicks arrive off the GTK thread; poll
             // the channel on the main loop and act here.
-            let rx = crate::tray::spawn();
+            let (rx, tray) = crate::tray::spawn();
+            *self.tray.borrow_mut() = Some(tray);
+            win.refresh_preset_list();
             glib::timeout_add_local(
                 std::time::Duration::from_millis(150),
                 glib::clone!(
@@ -245,6 +254,9 @@ mod imp {
                                     win.present();
                                 }
                                 crate::tray::TrayCmd::Quit => win.do_quit(),
+                                crate::tray::TrayCmd::LoadPreset(name) => {
+                                    win.apply_preset(&name)
+                                }
                             }
                         }
                         glib::ControlFlow::Continue
@@ -1041,6 +1053,7 @@ impl ResonateWindow {
                 if let Some(engine) = win.imp().audio_engine.borrow().as_ref() {
                     engine.set_effect_enabled(idx, enabled);
                 }
+                win.clear_active_preset();
             }
         ));
 
@@ -1058,6 +1071,7 @@ impl ResonateWindow {
                 if let Some(engine) = win.imp().audio_engine.borrow().as_ref() {
                     engine.set_effect_param(idx, &param, value);
                 }
+                win.clear_active_preset();
             }
         ));
 
@@ -1141,13 +1155,7 @@ impl ResonateWindow {
         page.connect_preset_load(glib::clone!(
             #[weak(rename_to = win)]
             self,
-            move |name| {
-                let chain = win.imp().config.borrow().effect_presets.get(&name).cloned();
-                if let Some(chain) = chain {
-                    win.imp().config.borrow_mut().effects_chain = chain;
-                    win.rebuild_and_refresh_effects();
-                }
-            }
+            move |name| win.apply_preset(&name)
         ));
         page.connect_preset_delete(glib::clone!(
             #[weak(rename_to = win)]
@@ -1155,6 +1163,11 @@ impl ResonateWindow {
             move |name| {
                 win.imp().config.borrow_mut().effect_presets.remove(&name);
                 win.imp().config.borrow().save();
+                let mut active = win.imp().active_preset.borrow_mut();
+                if active.as_deref() == Some(name.as_str()) {
+                    *active = None;
+                }
+                drop(active);
                 win.refresh_preset_list();
             }
         ));
@@ -1171,10 +1184,34 @@ impl ResonateWindow {
             .collect();
         names.sort();
         self.imp().effects_page.set_presets(&names);
+        if let Some(tray) = self.imp().tray.borrow().as_ref() {
+            crate::tray::set_presets(tray, names, self.imp().active_preset.borrow().clone());
+        }
+    }
+
+    /// Load a named chain preset (from the effects page or the tray menu).
+    fn apply_preset(&self, name: &str) {
+        let Some(chain) = self.imp().config.borrow().effect_presets.get(name).cloned() else {
+            log::warn!("apply_preset: no preset named '{}'", name);
+            return;
+        };
+        self.imp().config.borrow_mut().effects_chain = chain;
+        self.rebuild_and_refresh_effects();
+        *self.imp().active_preset.borrow_mut() = Some(name.to_string());
+        self.refresh_preset_list();
+    }
+
+    /// The chain no longer matches any saved preset — drop the tray checkmark.
+    fn clear_active_preset(&self) {
+        if self.imp().active_preset.borrow().is_some() {
+            *self.imp().active_preset.borrow_mut() = None;
+            self.refresh_preset_list();
+        }
     }
 
     /// Persist the chain, rebuild the live engine chain, and refresh the rows.
     fn rebuild_and_refresh_effects(&self) {
+        self.clear_active_preset();
         let chain = self.imp().config.borrow().effects_chain.clone();
         self.imp().config.borrow().save();
         if let Some(engine) = self.imp().audio_engine.borrow().as_ref() {

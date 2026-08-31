@@ -11,7 +11,7 @@
 
 Name:           resonate
 Version:        0.1.0
-Release:        2%{?dist}
+Release:        3%{?dist}
 Summary:        Soundboard with a virtual microphone and real-time mic effects
 
 License:        GPL-3.0-or-later
@@ -84,6 +84,10 @@ desktop-file-validate %{buildroot}%{_datadir}/applications/%{appid}.desktop
 %{_datadir}/icons/hicolor/scalable/apps/%{appid}.svg
 
 %changelog
+* Mon Aug 31 2026 kilo2071 <gerhardprins@icloud.com> - 0.1.0-3
+- Effect parameters can be typed exactly (spin button beside each slider)
+- Effect presets can be switched from the tray menu
+
 * Mon Aug 31 2026 kilo2071 <gerhardprins@icloud.com> - 0.1.0-2
 - Per-sound settings (volume/start/trim/fades), sound editor, LCD scrubbing +
   oscilloscope, search, tile reorder, import normalization

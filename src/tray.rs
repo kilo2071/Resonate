@@ -6,23 +6,36 @@
 //! thread (see `window.rs`). On GNOME a tray host requires the "AppIndicator and
 //! KStatusNotifierItem Support" shell extension; without it the item is simply
 //! not shown (registration is harmless).
+//!
+//! The menu also carries the effect presets, so a chain can be switched without
+//! opening the window. The list is pushed in from the GTK thread with
+//! [`set_presets`]; `ksni::Handle::update` marks the menu dirty and the tray
+//! thread re-emits it.
 
 use std::sync::mpsc::{Receiver, Sender};
 
 use crate::APP_ID;
 
 /// Commands raised by the tray, consumed on the GTK main thread.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Debug)]
 pub enum TrayCmd {
     /// Show / raise the main window.
     Show,
     /// Quit the application for real (not just hide to background).
     Quit,
+    /// Apply the named effects-chain preset.
+    LoadPreset(String),
 }
 
-struct ResonateTray {
+pub struct ResonateTray {
     tx: Sender<TrayCmd>,
+    presets: Vec<String>,
+    /// Preset the live chain currently matches, if any (for the checkmark).
+    active: Option<String>,
 }
+
+/// Handle for updating the tray from the GTK thread.
+pub type TrayHandle = ksni::Handle<ResonateTray>;
 
 impl ksni::Tray for ResonateTray {
     fn id(&self) -> String {
@@ -43,7 +56,33 @@ impl ksni::Tray for ResonateTray {
     }
 
     fn menu(&self) -> Vec<ksni::MenuItem<Self>> {
-        use ksni::menu::{MenuItem, StandardItem};
+        use ksni::menu::{CheckmarkItem, MenuItem, StandardItem, SubMenu};
+
+        let presets: Vec<MenuItem<Self>> = if self.presets.is_empty() {
+            vec![StandardItem {
+                label: "No presets saved".into(),
+                enabled: false,
+                ..Default::default()
+            }
+            .into()]
+        } else {
+            self.presets
+                .iter()
+                .map(|name| {
+                    let target = name.clone();
+                    CheckmarkItem {
+                        label: name.clone(),
+                        checked: self.active.as_deref() == Some(name.as_str()),
+                        activate: Box::new(move |t: &mut Self| {
+                            let _ = t.tx.send(TrayCmd::LoadPreset(target.clone()));
+                        }),
+                        ..Default::default()
+                    }
+                    .into()
+                })
+                .collect()
+        };
+
         vec![
             StandardItem {
                 label: "Show Resonate".into(),
@@ -51,6 +90,14 @@ impl ksni::Tray for ResonateTray {
                 activate: Box::new(|t: &mut Self| {
                     let _ = t.tx.send(TrayCmd::Show);
                 }),
+                ..Default::default()
+            }
+            .into(),
+            MenuItem::Separator,
+            SubMenu {
+                label: "Effect Preset".into(),
+                icon_name: "media-eq-symbolic".into(),
+                submenu: presets,
                 ..Default::default()
             }
             .into(),
@@ -68,9 +115,24 @@ impl ksni::Tray for ResonateTray {
     }
 }
 
-/// Spawn the tray on its own thread and return the receiver for tray commands.
-pub fn spawn() -> Receiver<TrayCmd> {
+/// Spawn the tray on its own thread; returns the command receiver and a handle
+/// for pushing menu updates.
+pub fn spawn() -> (Receiver<TrayCmd>, TrayHandle) {
     let (tx, rx) = std::sync::mpsc::channel();
-    ksni::TrayService::new(ResonateTray { tx }).spawn();
-    rx
+    let service = ksni::TrayService::new(ResonateTray {
+        tx,
+        presets: Vec::new(),
+        active: None,
+    });
+    let handle = service.handle();
+    service.spawn();
+    (rx, handle)
+}
+
+/// Replace the preset list shown in the tray menu (call from the GTK thread).
+pub fn set_presets(handle: &TrayHandle, presets: Vec<String>, active: Option<String>) {
+    handle.update(move |tray| {
+        tray.presets = presets;
+        tray.active = active;
+    });
 }
