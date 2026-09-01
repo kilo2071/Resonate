@@ -95,7 +95,7 @@ desktop-file-validate %{buildroot}%{_datadir}/applications/%{appid}.desktop
 %{_datadir}/icons/hicolor/scalable/apps/%{appid}.svg
 
 %changelog
-* Tue Sep 01 2026 kilo2071 <gerhardprins@icloud.com> - 0.1.0-7
+* Tue Sep 01 2026 kilo2071 <74557968+kilo2071@users.noreply.github.com> - 0.1.0-7
 - Chain presets now ship with the app: Podcast, Broadcast, Noisy Room, Old
   Radio, Robot, Vocoder Robot, Demon, Chipmunk, Stadium Announcer, Cathedral
   (only those whose plugins are installed are offered)
@@ -105,13 +105,13 @@ desktop-file-validate %{buildroot}%{_datadir}/applications/%{appid}.desktop
   bass enhancer
 - Fixed a crash from using the plugin database from two threads at once
 
-* Tue Sep 01 2026 kilo2071 <gerhardprins@icloud.com> - 0.1.0-6
+* Tue Sep 01 2026 kilo2071 <74557968+kilo2071@users.noreply.github.com> - 0.1.0-6
 - Big effects show their important knobs first, with the rest under an
   "All parameters" expander (the parametric EQ has 181 controls)
 - The same effect can be added to the chain more than once; repeats are numbered
 - Plugin-supplied presets are read once per plugin instead of on every click
 
-* Tue Sep 01 2026 kilo2071 <gerhardprins@icloud.com> - 0.1.0-5
+* Tue Sep 01 2026 kilo2071 <74557968+kilo2071@users.noreply.github.com> - 0.1.0-5
 - Curated a lot more effects: Calf character plugins (ring modulator, vocoder,
   reverb, delays, rotary speaker, chorus, flanger, phaser, pulsator, saturator,
   crusher, tape), Rubber Band pitch shifting and x42 auto-tune, plus
@@ -120,18 +120,18 @@ desktop-file-validate %{buildroot}%{_datadir}/applications/%{appid}.desktop
 - Per-effect presets: a Preset dropdown above each effect's controls, from a
   curated table plus any presets the plugin itself ships
 
-* Tue Sep 01 2026 kilo2071 <gerhardprins@icloud.com> - 0.1.0-4
+* Tue Sep 01 2026 kilo2071 <74557968+kilo2071@users.noreply.github.com> - 0.1.0-4
 - Tray menu shows which effect preset is active: the presets are a radio group
   (with a "Custom" slot for an edited chain) and the name is repeated in the
   submenu label and tooltip
 - The active preset is derived from the chain, so it survives a restart; the
   in-app presets popover marks it too
 
-* Mon Aug 31 2026 kilo2071 <gerhardprins@icloud.com> - 0.1.0-3
+* Mon Aug 31 2026 kilo2071 <74557968+kilo2071@users.noreply.github.com> - 0.1.0-3
 - Effect parameters can be typed exactly (spin button beside each slider)
 - Effect presets can be switched from the tray menu
 
-* Mon Aug 31 2026 kilo2071 <gerhardprins@icloud.com> - 0.1.0-2
+* Mon Aug 31 2026 kilo2071 <74557968+kilo2071@users.noreply.github.com> - 0.1.0-2
 - Per-sound settings (volume/start/trim/fades), sound editor, LCD scrubbing +
   oscilloscope, search, tile reorder, import normalization
 - New built-in effects (Distortion, Bitcrusher, Telephone), curated LV2 picker,
@@ -139,6 +139,6 @@ desktop-file-validate %{buildroot}%{_datadir}/applications/%{appid}.desktop
 - Global numpad hotkeys via the GlobalShortcuts portal (dbus crate; the dbus-1
   BuildRequires was already in place); fixed the --hidden autostart entry
 
-* Sun Jun 07 2026 kilo2071 <gerhardprins@icloud.com> - 0.1.0-1
+* Sun Jun 07 2026 kilo2071 <74557968+kilo2071@users.noreply.github.com> - 0.1.0-1
 - Initial package: soundboard, PipeWire virtual mic, LV2 mic effects,
   background mode with tray indicator and start-on-login.
