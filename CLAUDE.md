@@ -144,11 +144,19 @@ GResource paths use prefix `/io/github/kilo2071/Resonate/`.
   sent as `TrayCmd` over an `mpsc` channel and drained by a 150 ms glib timeout on
   the main thread (no async runtime). Needs the GNOME "AppIndicator/KStatusNotifier"
   extension to be visible.
-  The menu carries an **Effect Preset** submenu (checkmark on the active one);
-  `window.rs` pushes the list in with `tray::set_presets` via the `TrayHandle`
-  returned by `spawn()`, and `TrayCmd::LoadPreset` comes back through the same
-  channel into `apply_preset`. `active_preset` is runtime-only and cleared by any
-  chain edit, so the checkmark never claims a stale preset.
+  The menu carries an **Effect Preset** submenu — a **radio group** over the saved
+  presets, plus a leading inert "Custom (unsaved)" slot when the chain matches no
+  preset, so exactly one item is always marked. The active name is repeated in the
+  submenu label (`Effect Preset: <name>`) and the SNI tooltip, because the GNOME
+  AppIndicator extension draws submenu radio marks faintly. `window.rs` pushes the
+  list in with `tray::set_presets` via the `TrayHandle` returned by `spawn()`, and
+  `TrayCmd::LoadPreset` comes back through the same channel into `apply_preset`.
+  The active preset is **derived**, not stored: `Config::active_preset()` compares
+  the live `effects_chain` against every saved preset (`config::chains_match`,
+  float-tolerant), so the marker is right after a restart and returns on its own
+  when an edit is undone. `imp.active_preset` is only a memo of what was last
+  pushed, so a slider drag touches D-Bus only when the marked preset changes. The
+  in-app presets popover marks the same preset with a check icon.
 - **Autostart**: a Settings switch writes/removes
   `~/.config/autostart/<APP_ID>.desktop` with `Exec=<exe> --hidden`. `--hidden`
   sets `START_HIDDEN`, so `activate()` creates the window (effects start) but does

@@ -10,7 +10,10 @@
 //! The menu also carries the effect presets, so a chain can be switched without
 //! opening the window. The list is pushed in from the GTK thread with
 //! [`set_presets`]; `ksni::Handle::update` marks the menu dirty and the tray
-//! thread re-emits it.
+//! thread re-emits it. The presets are a radio group (plus a "Custom" slot for a
+//! chain matching no preset) and the active name is repeated in the submenu
+//! label and the tooltip, so the current selection is readable even on hosts
+//! that draw radio marks poorly.
 
 use std::sync::mpsc::{Receiver, Sender};
 
@@ -30,7 +33,7 @@ pub enum TrayCmd {
 pub struct ResonateTray {
     tx: Sender<TrayCmd>,
     presets: Vec<String>,
-    /// Preset the live chain currently matches, if any (for the checkmark).
+    /// Preset the live chain currently matches, if any (the radio selection).
     active: Option<String>,
 }
 
@@ -55,8 +58,38 @@ impl ksni::Tray for ResonateTray {
         let _ = self.tx.send(TrayCmd::Show);
     }
 
+    fn tool_tip(&self) -> ksni::ToolTip {
+        ksni::ToolTip {
+            icon_name: APP_ID.to_string(),
+            title: "Resonate".into(),
+            description: format!("Effect preset: {}", self.active_label()),
+            ..Default::default()
+        }
+    }
+
     fn menu(&self) -> Vec<ksni::MenuItem<Self>> {
-        use ksni::menu::{CheckmarkItem, MenuItem, StandardItem, SubMenu};
+        use ksni::menu::{MenuItem, RadioGroup, RadioItem, StandardItem, SubMenu};
+
+        // The radio group needs a selected index, and the chain often matches no
+        // preset at all (freshly edited). A leading, inert "Custom" option gives
+        // that state something to point at, so exactly one item is always marked.
+        let active = self.active.as_deref().filter(|a| self.presets.iter().any(|p| p == a));
+        let custom_slot = active.is_none();
+        let mut options: Vec<RadioItem> = Vec::new();
+        if custom_slot {
+            options.push(RadioItem {
+                label: "Custom (unsaved)".into(),
+                ..Default::default()
+            });
+        }
+        options.extend(self.presets.iter().map(|name| RadioItem {
+            label: escape_label(name),
+            ..Default::default()
+        }));
+        let selected = active
+            .and_then(|a| self.presets.iter().position(|p| p == a))
+            .map(|i| i + usize::from(custom_slot))
+            .unwrap_or(0);
 
         let presets: Vec<MenuItem<Self>> = if self.presets.is_empty() {
             vec![StandardItem {
@@ -66,21 +99,23 @@ impl ksni::Tray for ResonateTray {
             }
             .into()]
         } else {
-            self.presets
-                .iter()
-                .map(|name| {
-                    let target = name.clone();
-                    CheckmarkItem {
-                        label: name.clone(),
-                        checked: self.active.as_deref() == Some(name.as_str()),
-                        activate: Box::new(move |t: &mut Self| {
-                            let _ = t.tx.send(TrayCmd::LoadPreset(target.clone()));
-                        }),
-                        ..Default::default()
+            let names = self.presets.clone();
+            vec![RadioGroup {
+                selected,
+                options,
+                select: Box::new(move |t: &mut Self, idx: usize| {
+                    // Index 0 is the "Custom" slot when it is shown; picking it
+                    // means "keep what I have", so there is nothing to load.
+                    let idx = match idx.checked_sub(usize::from(custom_slot)) {
+                        Some(i) => i,
+                        None => return,
+                    };
+                    if let Some(name) = names.get(idx) {
+                        let _ = t.tx.send(TrayCmd::LoadPreset(name.clone()));
                     }
-                    .into()
-                })
-                .collect()
+                }),
+            }
+            .into()]
         };
 
         vec![
@@ -95,7 +130,10 @@ impl ksni::Tray for ResonateTray {
             .into(),
             MenuItem::Separator,
             SubMenu {
-                label: "Effect Preset".into(),
+                // The active preset is spelled out in the label too: some SNI
+                // hosts (the GNOME AppIndicator extension included) draw the
+                // radio mark faintly or not at all in submenus.
+                label: format!("Effect Preset: {}", escape_label(&self.active_label())),
                 icon_name: "media-eq-symbolic".into(),
                 submenu: presets,
                 ..Default::default()
@@ -113,6 +151,23 @@ impl ksni::Tray for ResonateTray {
             .into(),
         ]
     }
+}
+
+impl ResonateTray {
+    /// What to show as the current preset: its name, or "Custom" when the live
+    /// chain matches none of the saved ones.
+    fn active_label(&self) -> String {
+        self.active
+            .clone()
+            .filter(|a| self.presets.contains(a))
+            .unwrap_or_else(|| "Custom".to_string())
+    }
+}
+
+/// Escape a user-supplied string for a dbusmenu label: a single underscore is
+/// eaten as a mnemonic marker, a doubled one renders as itself.
+fn escape_label(label: &str) -> String {
+    label.replace('_', "__")
 }
 
 /// Spawn the tray on its own thread; returns the command receiver and a handle

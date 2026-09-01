@@ -28,6 +28,25 @@ impl EffectEntry {
     }
 }
 
+/// Structural equality for two chain entries: same effect, same enabled state
+/// and the same control values (float-tolerant, so a value that round-tripped
+/// through the UI still matches the preset it came from).
+fn entries_match(a: &EffectEntry, b: &EffectEntry) -> bool {
+    if a.id != b.id || a.enabled != b.enabled || a.params.len() != b.params.len() {
+        return false;
+    }
+    a.params.iter().all(|(k, v)| match b.params.get(k) {
+        Some(other) => (v - other).abs() <= 1e-6 * v.abs().max(1.0),
+        None => false,
+    })
+}
+
+/// True if two effect chains are the same effects, in the same order, with the
+/// same settings.
+pub fn chains_match(a: &[EffectEntry], b: &[EffectEntry]) -> bool {
+    a.len() == b.len() && a.iter().zip(b).all(|(x, y)| entries_match(x, y))
+}
+
 /// When a sound's saved start point applies.
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Default)]
 #[serde(rename_all = "snake_case")]
@@ -158,6 +177,20 @@ impl Default for Config {
 }
 
 impl Config {
+    /// Name of the saved preset the live chain currently matches, if any.
+    /// Derived (never stored), so the tray/popover marker is right after a
+    /// restart and comes back on its own when an edit is undone.
+    pub fn active_preset(&self) -> Option<String> {
+        let mut hits: Vec<&String> = self
+            .effect_presets
+            .iter()
+            .filter(|(_, chain)| chains_match(chain, &self.effects_chain))
+            .map(|(name, _)| name)
+            .collect();
+        hits.sort();
+        hits.first().map(|n| (*n).clone())
+    }
+
     pub fn load() -> Self {
         let path = Self::config_path();
         if path.exists() {
@@ -220,5 +253,51 @@ impl Config {
 
     pub fn remove_sound_settings(&mut self, path: &std::path::Path) {
         self.sounds.remove(&Self::sound_key(path));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn cfg_with(chain: Vec<EffectEntry>, presets: &[(&str, Vec<EffectEntry>)]) -> Config {
+        let mut cfg = Config::default();
+        cfg.effects_chain = chain;
+        cfg.effect_presets = presets
+            .iter()
+            .map(|(n, c)| (n.to_string(), c.clone()))
+            .collect();
+        cfg
+    }
+
+    #[test]
+    fn active_preset_matches_the_loaded_chain() {
+        let broadcast = vec![EffectEntry::gate(0.02, 10.0, 100.0, true), EffectEntry::gain(1.5, true)];
+        let cfg = cfg_with(broadcast.clone(), &[("Broadcast", broadcast)]);
+        assert_eq!(cfg.active_preset().as_deref(), Some("Broadcast"));
+    }
+
+    #[test]
+    fn an_edited_chain_matches_nothing() {
+        let broadcast = vec![EffectEntry::gain(1.5, true)];
+        let mut cfg = cfg_with(broadcast.clone(), &[("Broadcast", broadcast)]);
+        cfg.effects_chain[0].params.insert("gain".into(), 2.0);
+        assert_eq!(cfg.active_preset(), None);
+        // …and comes back when the edit is undone.
+        cfg.effects_chain[0].params.insert("gain".into(), 1.5);
+        assert_eq!(cfg.active_preset().as_deref(), Some("Broadcast"));
+    }
+
+    #[test]
+    fn order_and_enabled_state_are_part_of_the_match() {
+        let a = EffectEntry::gain(1.0, true);
+        let b = EffectEntry::gate(0.02, 10.0, 100.0, true);
+        let cfg = cfg_with(vec![b.clone(), a.clone()], &[("P", vec![a.clone(), b.clone()])]);
+        assert_eq!(cfg.active_preset(), None);
+
+        let mut off = a.clone();
+        off.enabled = false;
+        let cfg = cfg_with(vec![off], &[("P", vec![a])]);
+        assert_eq!(cfg.active_preset(), None);
     }
 }

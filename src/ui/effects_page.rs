@@ -241,8 +241,10 @@ impl ResonateEffectsPage {
         self.imp().mic_level_bar.set_value(value as f64);
     }
 
-    /// Rebuild the presets popover list.
-    pub fn set_presets(&self, names: &[String]) {
+    /// Rebuild the presets popover list. `active` is the preset the live chain
+    /// currently matches; it gets a check mark and a bold label so the popover
+    /// says the same thing as the tray menu.
+    pub fn set_presets(&self, names: &[String], active: Option<&str>) {
         let container = &self.imp().presets_box;
         while let Some(child) = container.first_child() {
             container.remove(&child);
@@ -262,8 +264,25 @@ impl ResonateEffectsPage {
                 .orientation(gtk::Orientation::Horizontal)
                 .spacing(4)
                 .build();
-            let load_btn = gtk::Button::builder()
+            let is_active = active == Some(name.as_str());
+            let content = gtk::Box::builder()
+                .orientation(gtk::Orientation::Horizontal)
+                .spacing(6)
+                .build();
+            let check = gtk::Image::from_icon_name("object-select-symbolic");
+            check.set_opacity(if is_active { 1.0 } else { 0.0 });
+            let label = gtk::Label::builder()
                 .label(name)
+                .xalign(0.0)
+                .hexpand(true)
+                .build();
+            if is_active {
+                label.add_css_class("heading");
+            }
+            content.append(&check);
+            content.append(&label);
+            let load_btn = gtk::Button::builder()
+                .child(&content)
                 .hexpand(true)
                 .css_classes(["flat"])
                 .build();
@@ -282,6 +301,11 @@ impl ResonateEffectsPage {
                     }
                 ));
             }
+            load_btn.set_tooltip_text(Some(if is_active {
+                "Current chain"
+            } else {
+                "Load this preset"
+            }));
             let del_btn = gtk::Button::builder()
                 .icon_name("user-trash-symbolic")
                 .tooltip_text("Delete preset")

@@ -41,8 +41,10 @@ mod imp {
         pub force_quit: Cell<bool>,
         /// Tray handle, for pushing the preset list into the tray menu.
         pub tray: RefCell<Option<crate::tray::TrayHandle>>,
-        /// Preset the live chain currently matches; cleared as soon as the chain
-        /// is edited, so the tray checkmark never claims a stale preset.
+        /// Last preset name pushed to the tray/effects page. Purely a memo of
+        /// what the UI is showing — the real answer is derived from the chain by
+        /// `Config::active_preset()` — so a slider drag only touches D-Bus when
+        /// the marked preset actually changes.
         pub active_preset: RefCell<Option<String>>,
     }
 
@@ -1053,7 +1055,7 @@ impl ResonateWindow {
                 if let Some(engine) = win.imp().audio_engine.borrow().as_ref() {
                     engine.set_effect_enabled(idx, enabled);
                 }
-                win.clear_active_preset();
+                win.sync_active_preset();
             }
         ));
 
@@ -1071,7 +1073,7 @@ impl ResonateWindow {
                 if let Some(engine) = win.imp().audio_engine.borrow().as_ref() {
                     engine.set_effect_param(idx, &param, value);
                 }
-                win.clear_active_preset();
+                win.sync_active_preset();
             }
         ));
 
@@ -1163,29 +1165,31 @@ impl ResonateWindow {
             move |name| {
                 win.imp().config.borrow_mut().effect_presets.remove(&name);
                 win.imp().config.borrow().save();
-                let mut active = win.imp().active_preset.borrow_mut();
-                if active.as_deref() == Some(name.as_str()) {
-                    *active = None;
-                }
-                drop(active);
                 win.refresh_preset_list();
             }
         ));
     }
 
     fn refresh_preset_list(&self) {
-        let mut names: Vec<String> = self
-            .imp()
-            .config
-            .borrow()
-            .effect_presets
-            .keys()
-            .cloned()
-            .collect();
+        let cfg = self.imp().config.borrow();
+        let mut names: Vec<String> = cfg.effect_presets.keys().cloned().collect();
         names.sort();
-        self.imp().effects_page.set_presets(&names);
+        let active = cfg.active_preset();
+        drop(cfg);
+        *self.imp().active_preset.borrow_mut() = active.clone();
+        self.imp().effects_page.set_presets(&names, active.as_deref());
         if let Some(tray) = self.imp().tray.borrow().as_ref() {
-            crate::tray::set_presets(tray, names, self.imp().active_preset.borrow().clone());
+            crate::tray::set_presets(tray, names, active);
+        }
+    }
+
+    /// Re-mark the active preset after a chain edit. The match is recomputed
+    /// from the chain itself, so it survives a restart and comes back when an
+    /// edit is undone; the list is only re-pushed when the answer changed.
+    fn sync_active_preset(&self) {
+        let active = self.imp().config.borrow().active_preset();
+        if *self.imp().active_preset.borrow() != active {
+            self.refresh_preset_list();
         }
     }
 
@@ -1196,22 +1200,13 @@ impl ResonateWindow {
             return;
         };
         self.imp().config.borrow_mut().effects_chain = chain;
+        // rebuild_and_refresh_effects re-marks the preset via sync_active_preset.
         self.rebuild_and_refresh_effects();
-        *self.imp().active_preset.borrow_mut() = Some(name.to_string());
-        self.refresh_preset_list();
-    }
-
-    /// The chain no longer matches any saved preset — drop the tray checkmark.
-    fn clear_active_preset(&self) {
-        if self.imp().active_preset.borrow().is_some() {
-            *self.imp().active_preset.borrow_mut() = None;
-            self.refresh_preset_list();
-        }
     }
 
     /// Persist the chain, rebuild the live engine chain, and refresh the rows.
     fn rebuild_and_refresh_effects(&self) {
-        self.clear_active_preset();
+        self.sync_active_preset();
         let chain = self.imp().config.borrow().effects_chain.clone();
         self.imp().config.borrow().save();
         if let Some(engine) = self.imp().audio_engine.borrow().as_ref() {
