@@ -356,7 +356,21 @@ impl ResonateEffectsPage {
     // ── Chain rows ──────────────────────────────────────────────────────────
 
     fn append_chain_row(&self, idx: usize, entry: &EffectEntry) {
-        let display = display_name(&entry.id);
+        // The same effect may appear more than once (two delays, an EQ each side
+        // of a compressor), so number repeats to tell the rows apart.
+        let base = display_name(&entry.id);
+        let seen = self
+            .imp()
+            .chain
+            .borrow()
+            .iter()
+            .filter(|e| e.id == entry.id)
+            .count();
+        let display = if seen > 0 {
+            format!("{base} {}", seen + 1)
+        } else {
+            base
+        };
 
         let row = adw::ActionRow::builder()
             .title(&display)
@@ -476,7 +490,7 @@ impl ResonateEffectsPage {
             .unwrap_or_default();
         self.build_effect_presets(idx, &id, &params, params_box);
 
-        self.build_params(idx, &params, params_box);
+        self.build_params(idx, &id, &params, params_box);
         self.imp().settings_stack.set_visible_child_name("params");
     }
 
@@ -552,9 +566,8 @@ impl ResonateEffectsPage {
         ));
     }
 
-    /// Build a control per parameter, picking the widget from its `ParamKind`:
-    /// switch (toggle), dropdown (enum), or slider (continuous/integer).
-    fn build_params(&self, idx: usize, params: &[PluginParam], container: &gtk::Box) {
+    /// Build the parameter panel: primary controls first, the rest folded away.
+    fn build_params(&self, idx: usize, id: &str, params: &[PluginParam], container: &gtk::Box) {
         if params.is_empty() {
             let label = gtk::Label::builder()
                 .label("This effect has no adjustable parameters.")
@@ -565,18 +578,55 @@ impl ResonateEffectsPage {
             return;
         }
 
-        let group = adw::PreferencesGroup::new();
-        for p in params {
-            let row = adw::ActionRow::builder().title(&p.label).build();
-            match &p.kind {
-                ParamKind::Toggle => self.build_toggle(idx, p, &row),
-                ParamKind::Enum(points) => self.build_dropdown(idx, p, points, &row),
-                ParamKind::Integer => self.build_slider(idx, p, &row, true),
-                ParamKind::Continuous => self.build_slider(idx, p, &row, false),
+        // Big plugins name the handful of knobs that matter (see plugins::layout);
+        // everything else goes in an expander rather than being hidden.
+        let primary = crate::plugins::layout::primary_params(id);
+        let (shown, rest): (Vec<&PluginParam>, Vec<&PluginParam>) = match primary {
+            Some(order) => {
+                let mut shown: Vec<&PluginParam> = Vec::with_capacity(order.len());
+                // Follow the curated order, not the plugin's port order.
+                for want in order {
+                    if let Some(p) = params.iter().find(|p| p.id == *want) {
+                        shown.push(p);
+                    }
+                }
+                let rest = params
+                    .iter()
+                    .filter(|p| !order.contains(&p.id.as_str()))
+                    .collect();
+                (shown, rest)
             }
-            group.add(&row);
+            None => (params.iter().collect(), Vec::new()),
+        };
+
+        let group = adw::PreferencesGroup::new();
+        for p in shown {
+            group.add(&self.build_param_row(idx, p));
+        }
+        if !rest.is_empty() {
+            let expander = adw::ExpanderRow::builder()
+                .title("All parameters")
+                .subtitle(format!("{} more", rest.len()))
+                .build();
+            for p in rest {
+                expander.add_row(&self.build_param_row(idx, p));
+            }
+            group.add(&expander);
         }
         container.append(&group);
+    }
+
+    /// One parameter row, with the control picked from its `ParamKind`:
+    /// switch (toggle), dropdown (enumerated choices), or slider + spin button.
+    fn build_param_row(&self, idx: usize, p: &PluginParam) -> adw::ActionRow {
+        let row = adw::ActionRow::builder().title(&p.label).build();
+        match &p.kind {
+            ParamKind::Toggle => self.build_toggle(idx, p, &row),
+            ParamKind::Enum(points) => self.build_dropdown(idx, p, points, &row),
+            ParamKind::Integer => self.build_slider(idx, p, &row, true),
+            ParamKind::Continuous => self.build_slider(idx, p, &row, false),
+        }
+        row
     }
 
     fn build_slider(&self, idx: usize, p: &PluginParam, row: &adw::ActionRow, integer: bool) {
@@ -772,11 +822,10 @@ impl ResonateEffectsPage {
                 #[weak(rename_to = page)]
                 self,
                 move |_| {
-                    let already = page.imp().chain.borrow().iter().any(|e| e.id == id);
-                    if !already {
-                        if let Some(f) = page.imp().add_fn.borrow().as_ref() {
-                            f(id.clone());
-                        }
+                    // Duplicates are allowed on purpose: two delays, or an EQ
+                    // before and after a compressor, are reasonable chains.
+                    if let Some(f) = page.imp().add_fn.borrow().as_ref() {
+                        f(id.clone());
                     }
                     page.imp().add_effect_sheet.set_open(false);
                 }

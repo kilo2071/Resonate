@@ -11,7 +11,7 @@
 
 Name:           resonate
 Version:        0.1.0
-Release:        5%{?dist}
+Release:        6%{?dist}
 Summary:        Soundboard with a virtual microphone and real-time mic effects
 
 License:        GPL-3.0-or-later
@@ -95,6 +95,12 @@ desktop-file-validate %{buildroot}%{_datadir}/applications/%{appid}.desktop
 %{_datadir}/icons/hicolor/scalable/apps/%{appid}.svg
 
 %changelog
+* Tue Sep 01 2026 kilo2071 <gerhardprins@icloud.com> - 0.1.0-6
+- Big effects show their important knobs first, with the rest under an
+  "All parameters" expander (the parametric EQ has 181 controls)
+- The same effect can be added to the chain more than once; repeats are numbered
+- Plugin-supplied presets are read once per plugin instead of on every click
+
 * Tue Sep 01 2026 kilo2071 <gerhardprins@icloud.com> - 0.1.0-5
 - Curated a lot more effects: Calf character plugins (ring modulator, vocoder,
   reverb, delays, rotary speaker, chorus, flanger, phaser, pulsator, saturator,

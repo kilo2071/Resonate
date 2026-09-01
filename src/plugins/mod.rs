@@ -1,5 +1,6 @@
 pub mod builtin;
 pub mod host;
+pub mod layout;
 pub mod lv2;
 pub mod presets;
 
@@ -299,6 +300,27 @@ mod tests {
     /// the add sheet, with nothing to notice. Entries whose plugin is not
     /// installed are skipped (that is exactly how the picker treats them), so
     /// this checks as much as the machine can offer.
+    #[test]
+    #[ignore = "reporting aid, run with --ignored"]
+    fn report_param_counts() {
+        lv2::tests::init_test_world();
+        for (id, name, ..) in BUILTINS {
+            let e = EffectEntry { id: (*id).to_string(), enabled: true, params: Default::default() };
+            if let Some(p) = plugin_from_entry(&e) {
+                eprintln!("{:>4}  {name}", p.params().len());
+            }
+        }
+        for (uri, name, ..) in CURATED_LV2 {
+            let e = EffectEntry { id: lv2::id_for_uri(uri), enabled: true, params: Default::default() };
+            if let Some(p) = plugin_from_entry(&e) {
+                let names: Vec<String> = p.params().iter().map(|x| x.id.clone()).collect();
+                eprintln!("{:>4}  {name}  [{}]", names.len(), names.join(" "));
+            } else {
+                eprintln!("   -  {name} (not installed)");
+            }
+        }
+    }
+
     #[test]
     fn curated_lv2_entries_load_and_process() {
         lv2::tests::init_test_world();

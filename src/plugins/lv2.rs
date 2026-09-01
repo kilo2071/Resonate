@@ -235,6 +235,26 @@ unsafe extern "C" fn collect_port_value(
 /// Reverb, Flanger, Filter and Mono Compressor, and users can add their own).
 /// Returns `(preset name, [(port symbol, value)])`, sorted by name.
 pub fn factory_presets(uri: &str) -> Vec<(String, Vec<(String, f32)>)> {
+    // Reading presets means parsing each preset file, and the effects page asks
+    // every time a row is selected. Bundles do not change under a running
+    // process, so read once per URI and keep it.
+    static CACHE: OnceLock<std::sync::Mutex<HashMap<String, Vec<(String, Vec<(String, f32)>)>>>> =
+        OnceLock::new();
+    let cache = CACHE.get_or_init(|| std::sync::Mutex::new(HashMap::new()));
+    if let Ok(c) = cache.lock() {
+        if let Some(hit) = c.get(uri) {
+            return hit.clone();
+        }
+    }
+
+    let presets = read_factory_presets(uri);
+    if let Ok(mut c) = cache.lock() {
+        c.insert(uri.to_string(), presets.clone());
+    }
+    presets
+}
+
+fn read_factory_presets(uri: &str) -> Vec<(String, Vec<(String, f32)>)> {
     let h = host();
     let Some(plugin) = h.world.plugin_by_uri(uri) else {
         return Vec::new();
