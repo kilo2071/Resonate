@@ -38,8 +38,10 @@ Config stored at: `~/.config/io.github.kilo2071.Resonate/config.json`
 - Installed LV2 plugins are hosted via the `livi` crate (links `lilv`) in `src/plugins/lv2.rs`, wrapped behind the same `ResonatePlugin` trait. A single process-global `Lv2Host` owns the `livi::World` for the program lifetime (lilv instances don't keep the world alive).
 - The chain runs in-process on the PipeWire **mic capture** callback (`src/audio/virtual_device.rs`): physical mic → `PluginChain::process` → Resonate sink. The chain is `Arc<Mutex<PluginChain>>`, shared with the UI thread (`try_lock` in the RT callback).
 - Chain is serialised to `config.json` as `effects_chain: Vec<EffectEntry>`. Built-in entries use ids `gain`/`gate`; LV2 entries use id `lv2:<uri>` with control values keyed by port symbol.
-- The effects page builds parameter sliders generically from `ResonatePlugin::params()`, so LV2 plugins get controls automatically; the "Add effect" sheet lists built-ins, then curated LV2 plugins only (`CURATED_LV2` — friendly names for the same LSP/RNNoise plugins Easy Effects wraps). The raw `lv2::discover()` catalogue is deliberately not shown, but chains referencing other LV2 ids still load.
-- The `easyeffects/` directory is a reference clone of Easy Effects — **never built or linked**. EE's effects are thin wrappers around Calf/LSP LV2 plugins; Resonate follows the same approach through its own `livi` host. Calf's LV2 bundle is not packaged on Fedora, so the fun effects (distortion, bitcrush, telephone) are native built-ins instead.
+- The effects page builds parameter sliders generically from `ResonatePlugin::params()`, so LV2 plugins get controls automatically; the "Add effect" sheet lists built-ins, then curated LV2 plugins only (`CURATED_LV2`), grouped by `Category` (**Voice & Cleanup** / **Character & Fun**). The raw `lv2::discover()` catalogue is deliberately not shown, but chains referencing other LV2 ids still load. Curated entries whose plugin is not installed are skipped, so the list can name more than the machine has.
+- **Per-effect presets** (`plugins/presets.rs`): ready-made settings for a *single* effect, distinct from the chain presets in `Config::effect_presets`. Two sources, concatenated by `presets_for(id)`: a hand-written `CURATED` table (verified against each plugin's `.ttl`; covers the built-ins, the LSP compressor, the Rubber Band pitch shifter and the Calf ring modulator/delay/crusher), plus presets the plugin ships, read through lilv by `lv2::factory_presets`. A preset lists only the params it cares about; the rest keep their values. The dropdown's current selection is derived by comparing live values (`preset_matches`), so it reads "Custom" the moment a knob moves.
+- `lv2::factory_presets` is the one place that reaches past `livi` to raw `lilv-sys`: `lilv_state_new_from_world` + `lilv_state_emit_port_values`, with a small process-wide URID map (`UridMap`) because livi keeps its own map private. Our URIDs need not match livi's — the atoms never reach a plugin, they are only read back through the same map.
+- The `easyeffects/` directory is a reference clone of Easy Effects — **never built or linked**. EE's effects are thin wrappers around Calf/LSP LV2 plugins; Resonate follows the same approach through its own `livi` host. Calf **is** packaged on Fedora (`lv2-calf-plugins`), so most character effects are curated Calf entries; the small native built-ins (distortion, bitcrush, telephone) stay because they work with nothing installed. `plugins::tests::curated_lv2_entries_load_and_process` instantiates, runs and **drops** every curated entry whose plugin is installed — dropping matters because Calf's Vinyl segfaults in its own cleanup, which is why that one is not curated. Pitch lives in `lv2-rubberband-plugins` (the `#livestereo` variant — the non-live ones add far too much latency for a mic) and auto-tune in `lv2-x42-plugins` (`fat1`). Calf's own "Pitch" is a *tuner*, not a shifter, so it is not curated.
 
 ## Key Dependencies
 
@@ -49,6 +51,8 @@ gtk = { version = "0.11", package = "gtk4", features = ["v4_14"] }
 adw = { version = "0.9", package = "libadwaita", features = ["v1_6"] }
 pipewire = "0.10"
 livi = "0.7"          # LV2 host (links system lilv/lv2 dev libs)
+lilv-sys = "0.2.1"    # preset (LilvState) reading livi does not wrap
+lv2_raw = "0.2"       # LV2_URID_Map struct for the above
 dbus = "0.9"          # GlobalShortcuts portal client (same libdbus ksni links)
 libloading = "0.8"
 serde = { version = "1", features = ["derive"] }
@@ -94,9 +98,11 @@ resonate/
 │   │   └── sampler.rs              # (legacy helper, mostly superseded by engine)
 │   ├── plugins/
 │   │   ├── mod.rs                  # ResonatePlugin trait, PluginParam, plugin_from_entry factory,
-│   │   │                           #   BUILTINS + CURATED_LV2 registries (friendly names)
+│   │   │                           #   BUILTINS + CURATED_LV2 registries (friendly names, Category)
 │   │   ├── host.rs                 # PluginChain (Vec<Box<dyn ResonatePlugin>>)
-│   │   ├── lv2.rs                  # LV2 host (livi): Lv2Host, discover(), Lv2Plugin
+│   │   ├── lv2.rs                  # LV2 host (livi): Lv2Host, discover(), Lv2Plugin,
+│   │   │                           #   factory_presets() via the raw lilv-sys state API
+│   │   ├── presets.rs              # per-effect presets: curated table + LV2 factory
 │   │   └── builtin/
 │   │       ├── mod.rs
 │   │       ├── gain.rs             # GainPlugin (0.0–4.0x linear)

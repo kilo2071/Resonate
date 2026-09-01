@@ -11,7 +11,7 @@
 
 Name:           resonate
 Version:        0.1.0
-Release:        4%{?dist}
+Release:        5%{?dist}
 Summary:        Soundboard with a virtual microphone and real-time mic effects
 
 License:        GPL-3.0-or-later
@@ -43,9 +43,16 @@ Requires:       pipewire
 Requires:       pipewire-pulseaudio
 Requires:       wireplumber
 
-# Effects work with the built-in Gain/Gate out of the box; these provide a rich
-# set of LV2 plugins (compressor, EQ, autogain, …) but are not required.
+# Effects work with the built-in Gain/Gate/Distortion/Bitcrusher/Telephone out of
+# the box; these supply the curated LV2 entries. Curated effects whose plugin is
+# missing are simply not listed, so none of these are required.
 Recommends:     lsp-plugins-lv2
+# Character effects: reverb, delays, ring modulator, vocoder, rotary speaker,
+# chorus/flanger/phaser, saturator, crusher, tape.
+Recommends:     lv2-calf-plugins
+# Pitch shifting (the low-latency "live" variant) and auto-tune.
+Recommends:     lv2-rubberband-plugins
+Recommends:     lv2-x42-plugins
 
 %global appid io.github.kilo2071.Resonate
 
@@ -54,8 +61,12 @@ Resonate is a native GNOME soundboard built with GTK 4 and Libadwaita. It
 exposes a PipeWire virtual microphone that mixes soundboard playback with your
 real microphone, and applies a real-time effects chain to the mic input using
 built-in plugins (Noise Gate, Gain, Distortion, Bitcrusher, Telephone) plus a
-curated set of LV2 plugins (Auto Gain, RNNoise noise suppression, compressor,
-limiter, EQs), with named chain presets. Sounds have per-file volume, start
+curated set of LV2 plugins, grouped into voice cleanup (RNNoise suppression,
+auto gain, compressor, de-esser, limiter, EQs) and character effects (pitch
+shifter, auto-tune, ring modulator, vocoder, reverb, delays, rotary speaker,
+chorus, flanger, phaser, saturator, crusher, tape). Each effect offers
+ready-made presets, and whole chains can be saved and switched from the tray.
+Sounds have per-file volume, start
 markers, trimming and fades, and can be triggered by global numpad hotkeys. It
 can run in the background (with a tray indicator) and start on login, acting as
 a voice-effects processor for calls, streaming and recording.
@@ -84,6 +95,15 @@ desktop-file-validate %{buildroot}%{_datadir}/applications/%{appid}.desktop
 %{_datadir}/icons/hicolor/scalable/apps/%{appid}.svg
 
 %changelog
+* Tue Sep 01 2026 kilo2071 <gerhardprins@icloud.com> - 0.1.0-5
+- Curated a lot more effects: Calf character plugins (ring modulator, vocoder,
+  reverb, delays, rotary speaker, chorus, flanger, phaser, pulsator, saturator,
+  crusher, tape), Rubber Band pitch shifting and x42 auto-tune, plus
+  de-esser, exciter and bass enhancer for voices
+- The Add Effect sheet is grouped into "Voice & Cleanup" and "Character & Fun"
+- Per-effect presets: a Preset dropdown above each effect's controls, from a
+  curated table plus any presets the plugin itself ships
+
 * Tue Sep 01 2026 kilo2071 <gerhardprins@icloud.com> - 0.1.0-4
 - Tray menu shows which effect preset is active: the presets are a radio group
   (with a "Custom" slot for an edited chain) and the name is repeated in the

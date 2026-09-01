@@ -40,9 +40,12 @@ There wasn't a nice native soundboard app for GNOME, so I vibecoded one over a c
 - **Survives across logins** — a PipeWire drop-in (`~/.config/pipewire/pipewire.conf.d/resonate.conf`) keeps a raw mic pass-through alive even when Resonate isn't running
 
 ### Mic effects
-- **Real-time effects chain** applied to the microphone: built-in **Noise Gate**, **Gain**, **Distortion**, **Bitcrusher** and **Telephone** (band-limit filter), plus a curated set of LV2 plugins (hosted via [`livi`](https://github.com/wmedrano/livi)): **Auto Gain**, **Noise Suppression (RNNoise)**, **Compressor**, **Limiter** and **Graphic/Parametric EQ** — the same plugins Easy Effects wraps
+- **Real-time effects chain** applied to the microphone, grouped into **Voice & Cleanup** and **Character & Fun**:
+  - *Voice & Cleanup* — built-in **Noise Gate** and **Gain**, plus curated LV2 (hosted via [`livi`](https://github.com/wmedrano/livi)): **Noise Suppression (RNNoise)**, **Auto Gain**, **Compressor**, **De-esser**, **Limiter**, **Graphic/Parametric EQ**, **Exciter**, **Bass Enhancer** — the same plugins Easy Effects wraps
+  - *Character & Fun* — built-in **Distortion**, **Bitcrusher** and **Telephone**, plus **Pitch Shifter** (chipmunk/demon), **Auto-Tune**, **Ring Modulator**, **Vocoder**, **Reverb**, **Vintage/Reverse Delay**, **Rotary Speaker**, **Multi Chorus**, **Flanger**, **Phaser**, **Pulsator**, **Saturator**, **Crusher** and **Tape Simulator**
 - **Add / remove / reorder** effects from the Effects page; controls are generated automatically per plugin and rendered by type — sliders, switches (toggles) and dropdowns (enumerated choices)
-- **Presets** — save the current chain under a name and switch between chains in one click
+- **Chain presets** — save the current chain under a name and switch between chains in one click, from the app or the tray menu (which marks the active one, or "Custom" once you tweak a knob)
+- **Per-effect presets** — a *Preset* dropdown above each effect's knobs with ready-made starting points ("Podcast", "Radio DJ", "Chipmunk", "Stadium announcer"), so a 70-knob compressor is one pick instead of an afternoon. Presets shipped by the plugin itself (Calf's, say) show up in the same list
 - **Level meter** — live post-effects mic level, so you can set the gate threshold by eye
 - Chain and presets are persisted to `config.json` and re-applied on launch. (The Add sheet only lists the curated plugins, but a chain referencing any other installed LV2 id still loads.)
 
@@ -111,8 +114,15 @@ Resonate hosts any LV2 plugin found on the standard search path (`~/.lv2`,
 `/usr/lib64/lv2`, …). Useful packages on Fedora:
 
 ```bash
-# A large, high-quality plugin suite (gate, compressor, autogain, EQ, …)
-sudo dnf install lsp-plugins-lv2 zam-plugins calf
+# Voice: a large, high-quality suite (gate, compressor, autogain, EQ, …)
+sudo dnf install lsp-plugins-lv2
+
+# Character & fun: reverb, delays, ring modulator, vocoder, rotary speaker,
+# chorus/flanger/phaser, saturator, crusher, tape
+sudo dnf install lv2-calf-plugins
+
+# Pitch shifting (chipmunk/demon) and auto-tune
+sudo dnf install lv2-rubberband-plugins lv2-x42-plugins
 
 # Noise cancellation (via the audinux COPR)
 sudo dnf copr enable ycollet/audinux
@@ -120,9 +130,11 @@ sudo dnf install noise-repellent
 ```
 
 The Add Effect sheet shows the built-ins plus a curated set of installed LV2
-plugins (discovery runs once when the Effects page first opens). A handy mic
-chain, in order: **Noise Gate** → **Noise Suppression (RNNoise)** →
-**Auto Gain** → **Gain**.
+plugins, grouped by category (discovery runs once when the Effects page first
+opens); curated effects whose plugin isn't installed are simply not listed. A
+handy mic chain, in order: **Noise Gate** → **Noise Suppression (RNNoise)** →
+**Auto Gain** → **Gain**. For a silly one: **Pitch Shifter** ("Demon") →
+**Ring Modulator** ("Robot") → **Vintage Delay** ("Stadium announcer").
 
 ## GNOME integration (icon & app name)
 

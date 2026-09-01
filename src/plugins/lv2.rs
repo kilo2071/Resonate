@@ -106,6 +106,195 @@ pub fn name_for_uri(uri: &str) -> Option<String> {
     host().world.plugin_by_uri(uri).map(|p| p.name())
 }
 
+// ── Factory presets ─────────────────────────────────────────────────────────────
+
+/// LV2 class every `pset:Preset` is an instance of.
+const LV2_PRESET_CLASS: &str = "http://lv2plug.in/ns/ext/presets#Preset";
+
+/// Minimal URID map. lilv needs one to turn a preset's RDF port values into
+/// typed atoms; livi keeps its own map private, and it does not matter that ours
+/// hands out different numbers — the ids we compare against come from the very
+/// same map, and the atoms never reach a plugin.
+struct UridMap {
+    uris: std::sync::Mutex<Vec<std::ffi::CString>>,
+}
+
+impl UridMap {
+    fn map(&self, uri: &std::ffi::CStr) -> u32 {
+        // Poisoning can only mean a panic while appending a URI; the vector is
+        // still consistent, so recover rather than take down the UI thread.
+        let mut uris = self.uris.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(pos) = uris.iter().position(|u| u.as_c_str() == uri) {
+            return pos as u32 + 1;
+        }
+        uris.push(uri.to_owned());
+        uris.len() as u32
+    }
+}
+
+extern "C" fn urid_map_cb(
+    handle: lv2_raw::LV2UridMapHandle,
+    uri: *const std::os::raw::c_char,
+) -> u32 {
+    if handle.is_null() || uri.is_null() {
+        return 0;
+    }
+    // Safe: `handle` is the &'static UridMap we install below, and lilv only
+    // passes us NUL-terminated URI strings it owns for the duration of the call.
+    let map = unsafe { &*(handle as *const UridMap) };
+    map.map(unsafe { std::ffi::CStr::from_ptr(uri) })
+}
+
+/// Atom type ids (in our own map) for the value types presets actually use.
+struct Urids {
+    float: u32,
+    double: u32,
+    int: u32,
+    long: u32,
+    bool_: u32,
+}
+
+struct PresetMapper {
+    map: &'static UridMap,
+    feature: lv2_raw::LV2UridMap,
+    urids: Urids,
+}
+
+// Safe: the only pointer inside is the handle to our own `'static` UridMap,
+// whose interior is a Mutex; the map callback is re-entrant across threads.
+unsafe impl Send for PresetMapper {}
+unsafe impl Sync for PresetMapper {}
+
+fn preset_mapper() -> &'static PresetMapper {
+    static MAPPER: OnceLock<PresetMapper> = OnceLock::new();
+    MAPPER.get_or_init(|| {
+        let map: &'static UridMap = Box::leak(Box::new(UridMap {
+            uris: std::sync::Mutex::new(Vec::new()),
+        }));
+        let urid = |uri: &str| {
+            let c = std::ffi::CString::new(uri).unwrap_or_default();
+            map.map(&c)
+        };
+        let urids = Urids {
+            float: urid("http://lv2plug.in/ns/ext/atom#Float"),
+            double: urid("http://lv2plug.in/ns/ext/atom#Double"),
+            int: urid("http://lv2plug.in/ns/ext/atom#Int"),
+            long: urid("http://lv2plug.in/ns/ext/atom#Long"),
+            bool_: urid("http://lv2plug.in/ns/ext/atom#Bool"),
+        };
+        PresetMapper {
+            map,
+            feature: lv2_raw::LV2UridMap {
+                handle: map as *const UridMap as *mut std::os::raw::c_void,
+                map: urid_map_cb,
+            },
+            urids,
+        }
+    })
+}
+
+/// Collector handed to lilv as `user_data` while walking one preset.
+struct PortValues<'a> {
+    urids: &'a Urids,
+    values: Vec<(String, f32)>,
+}
+
+/// lilv calls this once per port value stored in a preset.
+unsafe extern "C" fn collect_port_value(
+    symbol: *const std::os::raw::c_char,
+    user_data: *mut std::os::raw::c_void,
+    value: *const std::os::raw::c_void,
+    size: u32,
+    type_: u32,
+) {
+    if symbol.is_null() || user_data.is_null() || value.is_null() {
+        return;
+    }
+    let out = unsafe { &mut *(user_data as *mut PortValues) };
+    let Ok(symbol) = (unsafe { std::ffi::CStr::from_ptr(symbol) }).to_str() else {
+        return;
+    };
+    let u = out.urids;
+    // Presets store plain scalars; anything else (a file path, a vector) is not
+    // something our slider UI can represent, so skip it.
+    let v = if type_ == u.float && size as usize == std::mem::size_of::<f32>() {
+        unsafe { *(value as *const f32) }
+    } else if type_ == u.double && size as usize == std::mem::size_of::<f64>() {
+        unsafe { *(value as *const f64) as f32 }
+    } else if (type_ == u.int || type_ == u.bool_) && size as usize == std::mem::size_of::<i32>() {
+        unsafe { *(value as *const i32) as f32 }
+    } else if type_ == u.long && size as usize == std::mem::size_of::<i64>() {
+        unsafe { *(value as *const i64) as f32 }
+    } else {
+        return;
+    };
+    out.values.push((symbol.to_string(), v));
+}
+
+/// Presets shipped with an installed LV2 plugin (Calf ships a set for its
+/// Reverb, Flanger, Filter and Mono Compressor, and users can add their own).
+/// Returns `(preset name, [(port symbol, value)])`, sorted by name.
+pub fn factory_presets(uri: &str) -> Vec<(String, Vec<(String, f32)>)> {
+    let h = host();
+    let Some(plugin) = h.world.plugin_by_uri(uri) else {
+        return Vec::new();
+    };
+    let lworld = h.world.raw();
+    let preset_class = lworld.new_uri(LV2_PRESET_CLASS);
+    let Some(related) = plugin.raw().related(Some(&preset_class)) else {
+        return Vec::new();
+    };
+    let mapper = preset_mapper();
+
+    let mut out: Vec<(String, Vec<(String, f32)>)> = Vec::new();
+    for node in related.iter() {
+        // A preset is only a URI until its bundle is pulled into the world.
+        let _ = lworld.load_resource(&node);
+
+        // Safe: the world and node outlive this block, the mapper is 'static,
+        // and every state pointer we get is freed before we leave the loop.
+        let state = unsafe {
+            lilv_sys::lilv_state_new_from_world(
+                lworld.as_ptr(),
+                &mapper.feature as *const lv2_raw::LV2UridMap as *mut lv2_raw::LV2UridMap,
+                node.as_ptr(),
+            )
+        };
+        if state.is_null() {
+            continue;
+        }
+
+        let label_ptr = unsafe { lilv_sys::lilv_state_get_label(state) };
+        let label = if label_ptr.is_null() {
+            node.as_uri().unwrap_or("Preset").to_string()
+        } else {
+            unsafe { std::ffi::CStr::from_ptr(label_ptr) }
+                .to_string_lossy()
+                .into_owned()
+        };
+
+        let mut collector = PortValues {
+            urids: &mapper.urids,
+            values: Vec::new(),
+        };
+        unsafe {
+            lilv_sys::lilv_state_emit_port_values(
+                state,
+                Some(collect_port_value),
+                &mut collector as *mut PortValues as *mut std::os::raw::c_void,
+            );
+            lilv_sys::lilv_state_free(state);
+        }
+
+        if !collector.values.is_empty() {
+            out.push((label, collector.values));
+        }
+    }
+    let _ = mapper.map; // keep the map alive for as long as the feature exists
+    out.sort_by(|a, b| a.0.to_lowercase().cmp(&b.0.to_lowercase()));
+    out
+}
+
 /// Inspect a control-input port via lilv to choose the right UI control:
 /// toggle (boolean), dropdown (enumerated scale points), integer, or slider.
 fn classify_port(world: &livi::World, plugin: &livi::Plugin, index: usize) -> ParamKind {
@@ -324,5 +513,97 @@ impl ResonatePlugin for Lv2Plugin {
                 self.instance.set_control_input(*idx, v);
             }
         }
+    }
+}
+
+#[cfg(test)]
+pub(crate) mod tests {
+    use super::*;
+    use std::io::Write;
+
+    const RNNOISE: &str = "https://github.com/werman/noise-suppression-for-voice#stereo";
+
+    /// Prepare the plugin world for tests, exactly once per process: stage a
+    /// bundle with a known preset and extend `LV2_PATH` before anything builds
+    /// the world (`host()` initialises it once and keeps it forever). Every test
+    /// that touches the world — here or in `presets` — must call this first, so
+    /// that whichever runs first does the staging while the others wait.
+    pub fn init_test_world() {
+        static INIT: std::sync::Once = std::sync::Once::new();
+        INIT.call_once(|| {
+            stage_preset_bundle(RNNOISE, "vad_threshold", 42.0);
+        });
+    }
+
+    /// Write a throwaway LV2 bundle holding one preset for `plugin_uri`, and put
+    /// it on `LV2_PATH` alongside the system bundles.
+    fn stage_preset_bundle(plugin_uri: &str, symbol: &str, value: f32) -> std::path::PathBuf {
+        // LV2_PATH entries are directories *containing* bundles, so the bundle
+        // gets its own parent rather than being listed directly.
+        let root = std::env::temp_dir().join("resonate-lv2-test");
+        let dir = root.join("resonate-preset-test.lv2");
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&dir).expect("create test bundle");
+
+        let manifest = format!(
+            "@prefix lv2: <http://lv2plug.in/ns/lv2core#> .\n\
+             @prefix pset: <http://lv2plug.in/ns/ext/presets#> .\n\
+             @prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .\n\
+             <http://resonate.test/preset/one>\n\
+             \ta pset:Preset ;\n\
+             \tlv2:appliesTo <{plugin_uri}> ;\n\
+             \trdfs:seeAlso <preset.ttl> .\n"
+        );
+        let preset = format!(
+            "@prefix lv2: <http://lv2plug.in/ns/lv2core#> .\n\
+             @prefix pset: <http://lv2plug.in/ns/ext/presets#> .\n\
+             @prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .\n\
+             <http://resonate.test/preset/one>\n\
+             \ta pset:Preset ;\n\
+             \tlv2:appliesTo <{plugin_uri}> ;\n\
+             \trdfs:label \"Resonate Test Preset\" ;\n\
+             \tlv2:port [ lv2:symbol \"{symbol}\" ; pset:value {value:.1} ] .\n"
+        );
+        for (name, body) in [("manifest.ttl", manifest), ("preset.ttl", preset)] {
+            let mut f = std::fs::File::create(dir.join(name)).expect("write bundle file");
+            f.write_all(body.as_bytes()).expect("write bundle file");
+        }
+
+        let existing = std::env::var("LV2_PATH").unwrap_or_else(|_| "/usr/lib64/lv2".to_string());
+        // Safe: single-threaded here — this runs before the world (and any
+        // other thread that could read the environment) exists.
+        unsafe { std::env::set_var("LV2_PATH", format!("{existing}:{}", root.display())) };
+        root
+    }
+
+    /// Exercises the lilv state FFI end to end: a staged bundle's preset must
+    /// come back with its label and its port value. Skipped when the plugin it
+    /// applies to isn't installed, so the suite still passes elsewhere.
+    #[test]
+    fn factory_presets_read_port_values() {
+        init_test_world();
+
+        if host().world.plugin_by_uri(RNNOISE).is_none() {
+            eprintln!("RNNoise not installed — skipping");
+            return;
+        }
+
+        let presets = factory_presets(RNNOISE);
+        let staged = presets
+            .iter()
+            .find(|(name, _)| name == "Resonate Test Preset")
+            .expect("staged preset is found");
+        assert_eq!(staged.1, vec![("vad_threshold".to_string(), 42.0)]);
+
+        // Every preset we do return must be well formed…
+        for (name, values) in &presets {
+            assert!(!name.is_empty());
+            for (symbol, value) in values {
+                assert!(!symbol.is_empty());
+                assert!(value.is_finite(), "'{symbol}' = {value}");
+            }
+        }
+        // …and an unknown URI must come back empty rather than panic.
+        assert!(factory_presets("http://example.org/not-a-plugin").is_empty());
     }
 }

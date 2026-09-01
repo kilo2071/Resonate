@@ -1077,6 +1077,32 @@ impl ResonateWindow {
             }
         ));
 
+        // Per-effect presets: set the named params, leave the rest alone.
+        page.connect_effect_preset(glib::clone!(
+            #[weak(rename_to = win)]
+            self,
+            move |idx, values| {
+                {
+                    let mut cfg = win.imp().config.borrow_mut();
+                    if let Some(e) = cfg.effects_chain.get_mut(idx) {
+                        for (param, value) in &values {
+                            e.params.insert(param.clone(), *value);
+                        }
+                    }
+                }
+                win.imp().config.borrow().save();
+                if let Some(engine) = win.imp().audio_engine.borrow().as_ref() {
+                    for (param, value) in &values {
+                        engine.set_effect_param(idx, param, *value);
+                    }
+                }
+                // Redraw the sliders where the preset put them, then re-check
+                // whether the chain still matches a saved chain preset.
+                win.imp().effects_page.get().refresh_params();
+                win.sync_active_preset();
+            }
+        ));
+
         // Supplies live parameter metadata so the panel works for LV2 too.
         page.connect_param_provider(glib::clone!(
             #[weak(rename_to = win)]

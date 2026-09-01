@@ -22,6 +22,10 @@ log = "0.4"
 env_logger = "0.11"
 rodio = { version = "0.20", default-features = false, features = ["symphonia-all"] }
 livi = "0.7.5"
+# Preset (LilvState) reading that livi does not wrap; pinned to the versions livi
+# already resolves so the raw lilv/LV2 types are the same ones livi hands us.
+lilv-sys = "0.2.1"
+lv2_raw = "0.2"
 ksni = "0.2"
 dbus = "0.9"   # GlobalShortcuts portal client (blocking, same libdbus ksni uses)
 

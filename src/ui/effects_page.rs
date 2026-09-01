@@ -22,6 +22,8 @@ type AddFn = Box<dyn Fn(String) + 'static>;
 type RemoveFn = Box<dyn Fn(usize) + 'static>;
 type MoveFn = Box<dyn Fn(usize, bool) + 'static>;
 type PresetFn = Box<dyn Fn(String) + 'static>;
+/// (chain index, [(param id, value)]) — apply one per-effect preset.
+type EffectPresetFn = Box<dyn Fn(usize, Vec<(String, f32)>) + 'static>;
 type ParamProvider = Box<dyn Fn(usize) -> Vec<PluginParam> + 'static>;
 
 // ── GObject subclass ──────────────────────────────────────────────────────────
@@ -73,6 +75,7 @@ mod imp {
         pub preset_load_fn: RefCell<Option<PresetFn>>,
         pub preset_delete_fn: RefCell<Option<PresetFn>>,
         pub param_provider: RefCell<Option<ParamProvider>>,
+        pub effect_preset_fn: RefCell<Option<EffectPresetFn>>,
         pub available_built: RefCell<bool>,
     }
 
@@ -104,6 +107,7 @@ mod imp {
                 preset_load_fn: RefCell::new(None),
                 preset_delete_fn: RefCell::new(None),
                 param_provider: RefCell::new(None),
+                effect_preset_fn: RefCell::new(None),
                 available_built: RefCell::new(false),
             }
         }
@@ -335,6 +339,20 @@ impl ResonateEffectsPage {
         *self.imp().param_provider.borrow_mut() = Some(Box::new(f));
     }
 
+    /// Fired when a per-effect preset is picked: (chain index, values to set).
+    pub fn connect_effect_preset<F: Fn(usize, Vec<(String, f32)>) + 'static>(&self, f: F) {
+        *self.imp().effect_preset_fn.borrow_mut() = Some(Box::new(f));
+    }
+
+    /// Rebuild the parameter panel from the live values (after a preset was
+    /// applied, so every slider shows where the preset put it).
+    pub fn refresh_params(&self) {
+        let idx = *self.imp().selected_idx.borrow();
+        if let Some(idx) = idx {
+            self.select_effect(idx);
+        }
+    }
+
     // ── Chain rows ──────────────────────────────────────────────────────────
 
     fn append_chain_row(&self, idx: usize, entry: &EffectEntry) {
@@ -449,8 +467,89 @@ impl ResonateEffectsPage {
             .map(|f| f(idx))
             .unwrap_or_default();
 
+        let id = self
+            .imp()
+            .chain
+            .borrow()
+            .get(idx)
+            .map(|e| e.id.clone())
+            .unwrap_or_default();
+        self.build_effect_presets(idx, &id, &params, params_box);
+
         self.build_params(idx, &params, params_box);
         self.imp().settings_stack.set_visible_child_name("params");
+    }
+
+    /// A "Preset" row above the knobs: ready-made settings for this one effect
+    /// (see `plugins::presets`). Like the chain presets in the tray, the current
+    /// selection is *derived* — if the live values match a preset it is shown,
+    /// otherwise the row reads "Custom" — so it can never claim a setting the
+    /// sliders have since moved away from. Nothing is shown for effects with no
+    /// presets (Gain has one knob; it needs no help).
+    fn build_effect_presets(
+        &self,
+        idx: usize,
+        id: &str,
+        params: &[PluginParam],
+        container: &gtk::Box,
+    ) {
+        let presets = crate::plugins::presets::presets_for(id);
+        if presets.is_empty() {
+            return;
+        }
+
+        let mut labels: Vec<String> = Vec::with_capacity(presets.len() + 1);
+        labels.push("Custom".to_string());
+        labels.extend(presets.iter().map(|p| p.name.clone()));
+        let label_refs: Vec<&str> = labels.iter().map(String::as_str).collect();
+
+        let dropdown = gtk::DropDown::from_strings(&label_refs);
+        dropdown.set_valign(gtk::Align::Center);
+        // Long factory-preset lists (Calf ships a dozen for its Reverb) get a
+        // search box rather than a mile-long popup.
+        if presets.len() > 8 {
+            dropdown.set_enable_search(true);
+            dropdown.set_expression(Some(gtk::PropertyExpression::new(
+                gtk::StringObject::static_type(),
+                None::<gtk::Expression>,
+                "string",
+            )));
+        }
+
+        let matching = presets
+            .iter()
+            .position(|preset| preset_matches(preset, params))
+            .map(|i| i as u32 + 1)
+            .unwrap_or(0);
+        dropdown.set_selected(matching);
+
+        let group = adw::PreferencesGroup::new();
+        let row = adw::ActionRow::builder()
+            .title("Preset")
+            .subtitle("A starting point — tweak the knobs from there")
+            .build();
+        row.add_suffix(&dropdown);
+        group.add(&row);
+        container.append(&group);
+
+        // Connected last so setting the derived selection above does not fire it.
+        dropdown.connect_selected_notify(glib::clone!(
+            #[weak(rename_to = page)]
+            self,
+            move |dd| {
+                let selected = dd.selected();
+                // Index 0 is "Custom": it describes the state, it does not set it.
+                if selected == 0 {
+                    return;
+                }
+                let Some(preset) = presets.get(selected as usize - 1) else {
+                    return;
+                };
+                if let Some(f) = page.imp().effect_preset_fn.borrow().as_ref() {
+                    f(idx, preset.values.clone());
+                }
+            }
+        ));
     }
 
     /// Build a control per parameter, picking the widget from its `ParamKind`:
@@ -602,23 +701,62 @@ impl ResonateEffectsPage {
             list.remove(&row);
         }
 
-        // Built-ins, then curated LV2 (Easy Effects-style friendly names). The
-        // raw lilv catalogue is deliberately NOT listed — 200 uncurated LSP
+        // Built-ins, then curated LV2 (Easy Effects-style friendly names),
+        // grouped by category — the list is long enough now (a couple of dozen
+        // entries with Calf installed) that a flat wall of rows is hard to scan.
+        // The raw lilv catalogue is deliberately NOT listed: 200 uncurated LSP
         // entries just looked out of place. (Chains referencing other LV2 ids
-        // still load fine; they're only absent from this picker.)
-        let mut items: Vec<(String, String, String)> = crate::plugins::BUILTINS
-            .iter()
-            .map(|(id, name, desc)| (id.to_string(), name.to_string(), desc.to_string()))
-            .collect();
+        // still load fine; they're only absent from this picker.) Curated
+        // entries whose plugin is not installed are skipped, so shipping the
+        // whole Calf/Rubber Band/x42 list costs nothing when they are missing.
+        let mut items: Vec<(String, String, String, crate::plugins::Category)> =
+            crate::plugins::BUILTINS
+                .iter()
+                .map(|(id, name, desc, cat)| {
+                    (id.to_string(), name.to_string(), desc.to_string(), *cat)
+                })
+                .collect();
 
         let discovered = lv2::discover();
-        for (uri, name, desc) in crate::plugins::CURATED_LV2 {
+        for (uri, name, desc, cat) in crate::plugins::CURATED_LV2 {
             if discovered.iter().any(|info| info.uri == *uri) {
-                items.push((lv2::id_for_uri(uri), name.to_string(), desc.to_string()));
+                items.push((
+                    lv2::id_for_uri(uri),
+                    name.to_string(),
+                    desc.to_string(),
+                    *cat,
+                ));
             }
         }
 
-        for (id, name, desc) in items {
+        // Insert a header before each category's first row, in catalogue order.
+        let mut ordered: Vec<(String, String, String, crate::plugins::Category)> = Vec::new();
+        for cat in [crate::plugins::Category::Voice, crate::plugins::Category::Fun] {
+            ordered.extend(items.iter().filter(|(.., c)| *c == cat).cloned());
+        }
+        let items = ordered;
+        let mut current: Option<crate::plugins::Category> = None;
+
+        for (id, name, desc, cat) in items {
+            if current != Some(cat) {
+                current = Some(cat);
+                let header = gtk::Label::builder()
+                    .label(cat.label())
+                    .xalign(0.0)
+                    .margin_top(12)
+                    .margin_bottom(4)
+                    .margin_start(12)
+                    .css_classes(["heading", "dim-label"])
+                    .build();
+                let header_row = gtk::ListBoxRow::builder()
+                    .child(&header)
+                    .activatable(false)
+                    .selectable(false)
+                    .build();
+                // Marked so the search filter can hide headers while typing.
+                header_row.set_widget_name("category-header");
+                list.append(&header_row);
+            }
             let row = adw::ActionRow::builder()
                 .title(&name)
                 .subtitle(&desc)
@@ -656,7 +794,10 @@ impl ResonateEffectsPage {
                 let Some(row) = list_clone.row_at_index(i) else { break };
                 // Rows are AdwActionRows appended directly, so each one *is* the
                 // ListBoxRow — match against it, not its inner child.
-                let visible = if query.is_empty() {
+                let visible = if row.widget_name() == "category-header" {
+                    // Headers only make sense over the full, grouped list.
+                    query.is_empty()
+                } else if query.is_empty() {
                     true
                 } else {
                     row.downcast_ref::<adw::ActionRow>()
@@ -676,6 +817,17 @@ impl ResonateEffectsPage {
         let empty = self.imp().chain.borrow().is_empty();
         self.imp().chain_empty_label.set_visible(empty);
     }
+}
+
+/// True if every value a preset names is (near enough) what the effect is set to
+/// now. Values it does not mention are ignored — a preset is a partial setting.
+fn preset_matches(preset: &crate::plugins::presets::EffectPreset, params: &[PluginParam]) -> bool {
+    preset.values.iter().all(|(id, want)| {
+        params
+            .iter()
+            .find(|p| &p.id == id)
+            .is_some_and(|p| (p.value - want).abs() <= 1e-4 * want.abs().max(1.0))
+    })
 }
 
 /// Display name for a chain entry id: built-ins/curated by friendly name,
