@@ -31,15 +31,6 @@ const PRIMARY: &[(&str, &[&str])] = &[
         &["level", "preamp", "max_amp", "silence", "lkahead", "weight"],
     ),
     (
-        // Sixteen band gains; the xs/xm/xe ports are the band edges the LSP GUI
-        // draws, not something to set by hand.
-        "lv2:http://lsp-plug.in/plugins/lv2/graph_equalizer_x16_stereo",
-        &[
-            "g_in", "g_out", "g_0", "g_1", "g_2", "g_3", "g_4", "g_5", "g_6", "g_7", "g_8", "g_9",
-            "g_10", "g_11", "g_12", "g_13", "g_14", "g_15",
-        ],
-    ),
-    (
         // Four fully adjustable bands up front (type/frequency/gain/Q); the other
         // twelve are one expander away.
         "lv2:http://lsp-plug.in/plugins/lv2/para_equalizer_x16_stereo",

@@ -57,6 +57,17 @@ unsafe impl Sync for Lv2Host {}
 
 static HOST: OnceLock<Lv2Host> = OnceLock::new();
 
+/// Serialises every use of the plugin world. lilv is not thread-safe: the world
+/// is a mutable RDF model, `load_resource` writes to it, and instantiating reads
+/// it — doing two of those at once segfaults (reproduced by running the plugin
+/// tests in parallel). In the app all of this happens on the GTK thread anyway;
+/// the lock makes the `unsafe impl Sync` above honest. The audio thread never
+/// touches the world, only instances it already holds, so it never waits here.
+fn world_lock() -> std::sync::MutexGuard<'static, ()> {
+    static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    LOCK.lock().unwrap_or_else(|e| e.into_inner())
+}
+
 fn host() -> &'static Lv2Host {
     HOST.get_or_init(|| {
         let world = livi::World::new();
@@ -80,6 +91,7 @@ pub struct Lv2Info {
 /// List installed LV2 plugins that can act as audio effects (≥1 audio in/out, no
 /// CV ports, not instruments), sorted by display name.
 pub fn discover() -> Vec<Lv2Info> {
+    let _guard = world_lock();
     let h = host();
     let mut out: Vec<Lv2Info> = h
         .world
@@ -103,6 +115,7 @@ pub fn discover() -> Vec<Lv2Info> {
 
 /// Human-readable name for an LV2 URI, if installed.
 pub fn name_for_uri(uri: &str) -> Option<String> {
+    let _guard = world_lock();
     host().world.plugin_by_uri(uri).map(|p| p.name())
 }
 
@@ -255,6 +268,7 @@ pub fn factory_presets(uri: &str) -> Vec<(String, Vec<(String, f32)>)> {
 }
 
 fn read_factory_presets(uri: &str) -> Vec<(String, Vec<(String, f32)>)> {
+    let _guard = world_lock();
     let h = host();
     let Some(plugin) = h.world.plugin_by_uri(uri) else {
         return Vec::new();
@@ -378,6 +392,7 @@ impl Lv2Plugin {
     /// Instantiate the plugin identified by `uri`. `params` overrides initial
     /// control values (keyed by port symbol); missing controls keep their default.
     pub fn instantiate(uri: &str, overrides: &HashMap<String, f32>) -> Option<Self> {
+        let _guard = world_lock();
         let h = host();
         let plugin = h.world.plugin_by_uri(uri)?;
         let counts = *plugin.port_counts();

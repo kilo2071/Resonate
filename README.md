@@ -41,10 +41,10 @@ There wasn't a nice native soundboard app for GNOME, so I vibecoded one over a c
 
 ### Mic effects
 - **Real-time effects chain** applied to the microphone, grouped into **Voice & Cleanup** and **Character & Fun**:
-  - *Voice & Cleanup* — built-in **Noise Gate** and **Gain**, plus curated LV2 (hosted via [`livi`](https://github.com/wmedrano/livi)): **Noise Suppression (RNNoise)**, **Auto Gain**, **Compressor**, **De-esser**, **Limiter**, **Graphic/Parametric EQ**, **Exciter**, **Bass Enhancer** — the same plugins Easy Effects wraps
+  - *Voice & Cleanup* — built-in **Noise Gate** and **Gain**, plus curated LV2 (hosted via [`livi`](https://github.com/wmedrano/livi)): **Noise Suppression (RNNoise)**, **Auto Gain**, **Compressor**, **De-esser**, **Limiter** and **Parametric EQ** — the same plugins Easy Effects wraps
   - *Character & Fun* — built-in **Distortion**, **Bitcrusher** and **Telephone**, plus **Pitch Shifter** (chipmunk/demon), **Auto-Tune**, **Ring Modulator**, **Vocoder**, **Reverb**, **Vintage/Reverse Delay**, **Rotary Speaker**, **Multi Chorus**, **Flanger**, **Phaser**, **Pulsator**, **Saturator**, **Crusher** and **Tape Simulator**
 - **Add / remove / reorder** effects from the Effects page (the same effect may be added twice — two delays, an EQ each side of a compressor); controls are generated automatically per plugin and rendered by type — sliders, switches (toggles) and dropdowns (enumerated choices). Plugins with a lot of controls show the important ones first and fold the rest into an **All parameters** expander
-- **Chain presets** — save the current chain under a name and switch between chains in one click, from the app or the tray menu (which marks the active one, or "Custom" once you tweak a knob)
+- **Chain presets** — save the current chain under a name and switch between chains in one click, from the app or the tray menu (which marks the active one, or "Custom" once you tweak a knob). Resonate ships a set to start from — *Podcast*, *Broadcast*, *Noisy Room*, *Old Radio*, *Robot*, *Vocoder Robot*, *Demon*, *Chipmunk*, *Stadium Announcer*, *Cathedral* — and hides the ones whose plugins aren't installed
 - **Per-effect presets** — a *Preset* dropdown above each effect's knobs with ready-made starting points ("Podcast", "Radio DJ", "Chipmunk", "Stadium announcer"), so a 70-knob compressor is one pick instead of an afternoon. Presets shipped by the plugin itself (Calf's, say) show up in the same list
 - **Level meter** — live post-effects mic level, so you can set the gate threshold by eye
 - Chain and presets are persisted to `config.json` and re-applied on launch. (The Add sheet only lists the curated plugins, but a chain referencing any other installed LV2 id still loads.)
@@ -133,8 +133,8 @@ The Add Effect sheet shows the built-ins plus a curated set of installed LV2
 plugins, grouped by category (discovery runs once when the Effects page first
 opens); curated effects whose plugin isn't installed are simply not listed. A
 handy mic chain, in order: **Noise Gate** → **Noise Suppression (RNNoise)** →
-**Auto Gain** → **Gain**. For a silly one: **Pitch Shifter** ("Demon") →
-**Ring Modulator** ("Robot") → **Vintage Delay** ("Stadium announcer").
+**Auto Gain** → **Gain** — or just load the *Podcast* chain preset. For a silly
+one, try the *Robot*, *Demon* or *Vocoder Robot* chains.
 
 ## GNOME integration (icon & app name)
 

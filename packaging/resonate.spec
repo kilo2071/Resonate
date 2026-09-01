@@ -11,7 +11,7 @@
 
 Name:           resonate
 Version:        0.1.0
-Release:        6%{?dist}
+Release:        7%{?dist}
 Summary:        Soundboard with a virtual microphone and real-time mic effects
 
 License:        GPL-3.0-or-later
@@ -62,12 +62,12 @@ exposes a PipeWire virtual microphone that mixes soundboard playback with your
 real microphone, and applies a real-time effects chain to the mic input using
 built-in plugins (Noise Gate, Gain, Distortion, Bitcrusher, Telephone) plus a
 curated set of LV2 plugins, grouped into voice cleanup (RNNoise suppression,
-auto gain, compressor, de-esser, limiter, EQs) and character effects (pitch
-shifter, auto-tune, ring modulator, vocoder, reverb, delays, rotary speaker,
-chorus, flanger, phaser, saturator, crusher, tape). Each effect offers
-ready-made presets, and whole chains can be saved and switched from the tray.
-Sounds have per-file volume, start
-markers, trimming and fades, and can be triggered by global numpad hotkeys. It
+auto gain, compressor, de-esser, limiter, parametric EQ) and character effects
+(pitch shifter, auto-tune, ring modulator, vocoder, reverb, delays, rotary
+speaker, chorus, flanger, phaser, saturator, crusher, tape). Each effect offers
+ready-made presets, ten chain presets ship with the app, and whole chains can be
+saved and switched from the tray. Sounds have per-file volume, start markers,
+trimming and fades, and can be triggered by global numpad hotkeys. It
 can run in the background (with a tray indicator) and start on login, acting as
 a voice-effects processor for calls, streaming and recording.
 
@@ -95,6 +95,16 @@ desktop-file-validate %{buildroot}%{_datadir}/applications/%{appid}.desktop
 %{_datadir}/icons/hicolor/scalable/apps/%{appid}.svg
 
 %changelog
+* Tue Sep 01 2026 kilo2071 <gerhardprins@icloud.com> - 0.1.0-7
+- Chain presets now ship with the app: Podcast, Broadcast, Noisy Room, Old
+  Radio, Robot, Vocoder Robot, Demon, Chipmunk, Stadium Announcer, Cathedral
+  (only those whose plugins are installed are offered)
+- The vocoder works as a voice effect at last: its presets raise the per-band
+  noise generator into a carrier, giving the whispered-robot sound
+- Dropped the graphic equaliser (the parametric one is a superset), exciter and
+  bass enhancer
+- Fixed a crash from using the plugin database from two threads at once
+
 * Tue Sep 01 2026 kilo2071 <gerhardprins@icloud.com> - 0.1.0-6
 - Big effects show their important knobs first, with the rest under an
   "All parameters" expander (the parametric EQ has 181 controls)

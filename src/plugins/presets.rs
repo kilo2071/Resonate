@@ -163,10 +163,50 @@ const CURATED: &[(&str, &[(&str, Values)])] = &[
     ),
 ];
 
-/// Every preset available for a chain entry: the curated ones first, then any
-/// the plugin ships itself.
-pub fn presets_for(id: &str) -> Vec<EffectPreset> {
-    let mut out: Vec<EffectPreset> = CURATED
+/// Calf's vocoder id — it needs presets built rather than tabulated.
+pub const CALF_VOCODER: &str = "lv2:http://calf.sourceforge.net/plugins/Vocoder";
+
+/// The vocoder has no oscillator of its own: it filters a *carrier* with the
+/// envelopes of a *modulator*, and Resonate feeds the microphone into both, so
+/// out of the box it just hands your voice back slightly band-shaped. What
+/// rescues it is `noise1`–`noise32`: a per-band noise generator, defaulted to
+/// -96 dB (off). Bring those up and the noise becomes the carrier — the classic
+/// whispered-robot vocoder, from one voice.
+///
+/// Built rather than written out because a table of 32 identical lines per
+/// preset would be unreadable.
+fn vocoder_presets() -> Vec<EffectPreset> {
+    let with_noise = |name: &str, noise: f32, extra: &[(&str, f32)]| {
+        let mut values: Vec<(String, f32)> = (1..=32)
+            .map(|band| (format!("noise{band}"), noise))
+            .collect();
+        // Only the vocoded signal, no dry voice or raw carrier bleeding through.
+        values.push(("processed".to_string(), 1.0));
+        values.push(("modulator".to_string(), 0.0));
+        values.push(("carrier".to_string(), 0.0));
+        values.extend(extra.iter().map(|(k, v)| ((*k).to_string(), *v)));
+        EffectPreset {
+            name: name.to_string(),
+            values,
+        }
+    };
+    vec![
+        // Snappy envelopes keep consonants; high isolation keeps it robotic.
+        with_noise("Robot (noise carrier)", 1.0, &[("attack", 5.0), ("release", 50.0), ("order", 6.0)]),
+        // Slower and softer: breathy rather than mechanical.
+        with_noise("Whisper", 0.5, &[("attack", 20.0), ("release", 200.0), ("order", 4.0)]),
+        // A little dry voice mixed back under the robot.
+        with_noise("Robot + voice", 1.0, &[("attack", 5.0), ("release", 50.0), ("modulator", 0.4)]),
+    ]
+}
+
+/// The presets Resonate itself provides for an effect: the table above, plus any
+/// that have to be generated.
+pub(crate) fn curated_presets(id: &str) -> Vec<EffectPreset> {
+    if id == CALF_VOCODER {
+        return vocoder_presets();
+    }
+    CURATED
         .iter()
         .find(|(key, _)| *key == id)
         .map(|(_, presets)| {
@@ -178,7 +218,13 @@ pub fn presets_for(id: &str) -> Vec<EffectPreset> {
                 })
                 .collect()
         })
-        .unwrap_or_default();
+        .unwrap_or_default()
+}
+
+/// Every preset available for a chain entry: the ones Resonate provides first,
+/// then any the plugin ships itself.
+pub fn presets_for(id: &str) -> Vec<EffectPreset> {
+    let mut out = curated_presets(id);
 
     if let Some(uri) = lv2::uri_from_id(id) {
         for (name, values) in lv2::factory_presets(uri) {
@@ -204,10 +250,27 @@ mod tests {
     fn curated_presets_name_real_params() {
         crate::plugins::lv2::tests::init_test_world();
 
+        // Everything Resonate offers, table-driven or generated, for every
+        // effect in the catalogue — a typo'd symbol or an out-of-range value
+        // would silently do nothing at runtime.
+        let ids: Vec<String> = crate::plugins::BUILTINS
+            .iter()
+            .map(|(id, ..)| (*id).to_string())
+            .chain(
+                crate::plugins::CURATED_LV2
+                    .iter()
+                    .map(|(uri, ..)| lv2::id_for_uri(uri)),
+            )
+            .collect();
+
         let mut checked = 0;
-        for (id, presets) in CURATED {
+        for id in &ids {
+            let presets = curated_presets(id);
+            if presets.is_empty() {
+                continue;
+            }
             let entry = crate::config::EffectEntry {
-                id: (*id).to_string(),
+                id: id.clone(),
                 enabled: true,
                 params: std::collections::HashMap::new(),
             };
@@ -216,24 +279,30 @@ mod tests {
                 continue;
             };
             let params = plugin.params();
-            for (name, values) in *presets {
-                for (param, value) in *values {
+            for preset in &presets {
+                for (param, value) in &preset.values {
                     let p = params
                         .iter()
                         .find(|p| p.id == *param)
-                        .unwrap_or_else(|| panic!("'{id}' preset '{name}': no param '{param}'"));
+                        .unwrap_or_else(|| {
+                            panic!("'{id}' preset '{}': no param '{param}'", preset.name)
+                        });
                     let (lo, hi) = (p.min.min(p.max), p.min.max(p.max));
                     assert!(
                         *value >= lo && *value <= hi,
-                        "'{id}' preset '{name}': {param} = {value} outside {lo}..={hi}"
+                        "'{id}' preset '{}': {param} = {value} outside {lo}..={hi}",
+                        preset.name
                     );
                     checked += 1;
                 }
             }
         }
         assert!(checked > 0, "no curated preset could be checked at all");
+        eprintln!("checked {checked} curated preset values");
     }
 
+    /// The table keys must stay in step with the catalogue: an effect removed
+    /// from `CURATED_LV2` leaves presets nothing to attach to.
     #[test]
     fn curated_keys_are_known_effects() {
         for (id, presets) in CURATED {

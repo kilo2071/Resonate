@@ -1,4 +1,5 @@
 pub mod builtin;
+pub mod chains;
 pub mod host;
 pub mod layout;
 pub mod lv2;
@@ -123,27 +124,9 @@ pub const CURATED_LV2: &[(&str, &str, &str, Category)] = &[
         Voice,
     ),
     (
-        "http://lsp-plug.in/plugins/lv2/graph_equalizer_x16_stereo",
-        "Graphic Equalizer",
-        "16-band tone shaping (LSP)",
-        Voice,
-    ),
-    (
         "http://lsp-plug.in/plugins/lv2/para_equalizer_x16_stereo",
         "Parametric Equalizer",
         "16 fully adjustable bands (LSP)",
-        Voice,
-    ),
-    (
-        "http://calf.sourceforge.net/plugins/Exciter",
-        "Exciter",
-        "Adds air and presence to a dull mic (Calf)",
-        Voice,
-    ),
-    (
-        "http://calf.sourceforge.net/plugins/BassEnhancer",
-        "Bass Enhancer",
-        "Adds weight to a thin voice (Calf)",
         Voice,
     ),
     // ── Character & fun ─────────────────────────────────────────────────────
@@ -168,7 +151,7 @@ pub const CURATED_LV2: &[(&str, &str, &str, Category)] = &[
     (
         "http://calf.sourceforge.net/plugins/Vocoder",
         "Vocoder",
-        "Classic talk-box robot; best with a carrier signal (Calf)",
+        "Whispered-robot voice — start from its noise-carrier preset (Calf)",
         Fun,
     ),
     (

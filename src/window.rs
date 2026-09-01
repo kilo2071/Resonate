@@ -1198,13 +1198,27 @@ impl ResonateWindow {
 
     fn refresh_preset_list(&self) {
         let cfg = self.imp().config.borrow();
-        let mut names: Vec<String> = cfg.effect_presets.keys().cloned().collect();
-        names.sort();
-        let active = cfg.active_preset();
+        let mut user: Vec<String> = cfg.effect_presets.keys().cloned().collect();
+        user.sort();
+        // Factory chains first, then saved ones; a saved chain of the same name
+        // shadows the factory one (lookups check saved first).
+        let mut presets: Vec<(String, bool)> = crate::plugins::chains::factory_chains()
+            .iter()
+            .map(|(name, _)| name.clone())
+            .filter(|name| !cfg.effect_presets.contains_key(name))
+            .map(|name| (name, true))
+            .collect();
+        presets.extend(user.into_iter().map(|name| (name, false)));
+
+        let active = cfg
+            .active_preset()
+            .or_else(|| crate::plugins::chains::matching_factory(&cfg.effects_chain));
         drop(cfg);
+
         *self.imp().active_preset.borrow_mut() = active.clone();
-        self.imp().effects_page.set_presets(&names, active.as_deref());
+        self.imp().effects_page.set_presets(&presets, active.as_deref());
         if let Some(tray) = self.imp().tray.borrow().as_ref() {
+            let names = presets.into_iter().map(|(name, _)| name).collect();
             crate::tray::set_presets(tray, names, active);
         }
     }
@@ -1213,15 +1227,23 @@ impl ResonateWindow {
     /// from the chain itself, so it survives a restart and comes back when an
     /// edit is undone; the list is only re-pushed when the answer changed.
     fn sync_active_preset(&self) {
-        let active = self.imp().config.borrow().active_preset();
+        let cfg = self.imp().config.borrow();
+        let active = cfg
+            .active_preset()
+            .or_else(|| crate::plugins::chains::matching_factory(&cfg.effects_chain));
+        drop(cfg);
         if *self.imp().active_preset.borrow() != active {
             self.refresh_preset_list();
         }
     }
 
     /// Load a named chain preset (from the effects page or the tray menu).
+    /// Saved presets win over factory ones of the same name.
     fn apply_preset(&self, name: &str) {
-        let Some(chain) = self.imp().config.borrow().effect_presets.get(name).cloned() else {
+        let saved = self.imp().config.borrow().effect_presets.get(name).cloned();
+        let Some(chain) = saved.or_else(|| {
+            crate::plugins::chains::factory_chain(name).map(|c| c.to_vec())
+        }) else {
             log::warn!("apply_preset: no preset named '{}'", name);
             return;
         };

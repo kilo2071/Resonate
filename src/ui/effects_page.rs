@@ -245,15 +245,17 @@ impl ResonateEffectsPage {
         self.imp().mic_level_bar.set_value(value as f64);
     }
 
-    /// Rebuild the presets popover list. `active` is the preset the live chain
+    /// Rebuild the presets popover list. Each entry is `(name, is_factory)`;
+    /// factory chains ship with Resonate and have no delete button, since there
+    /// is nothing of the user's to delete. `active` is the preset the live chain
     /// currently matches; it gets a check mark and a bold label so the popover
     /// says the same thing as the tray menu.
-    pub fn set_presets(&self, names: &[String], active: Option<&str>) {
+    pub fn set_presets(&self, presets: &[(String, bool)], active: Option<&str>) {
         let container = &self.imp().presets_box;
         while let Some(child) = container.first_child() {
             container.remove(&child);
         }
-        if names.is_empty() {
+        if presets.is_empty() {
             let label = gtk::Label::builder()
                 .label("No presets saved yet")
                 .css_classes(["dim-label", "caption"])
@@ -263,7 +265,7 @@ impl ResonateEffectsPage {
             container.append(&label);
             return;
         }
-        for name in names {
+        for (name, is_factory) in presets {
             let row = gtk::Box::builder()
                 .orientation(gtk::Orientation::Horizontal)
                 .spacing(4)
@@ -305,11 +307,21 @@ impl ResonateEffectsPage {
                     }
                 ));
             }
-            load_btn.set_tooltip_text(Some(if is_active {
-                "Current chain"
-            } else {
-                "Load this preset"
+            load_btn.set_tooltip_text(Some(match (is_active, is_factory) {
+                (true, _) => "Current chain",
+                (false, true) => "Load this built-in chain",
+                (false, false) => "Load this preset",
             }));
+            row.append(&load_btn);
+            if *is_factory {
+                // Built-in: nothing to delete, but keep the row width steady.
+                let spacer = gtk::Image::from_icon_name("emblem-default-symbolic");
+                spacer.set_tooltip_text(Some("Built-in chain"));
+                spacer.set_opacity(0.35);
+                row.append(&spacer);
+                container.append(&row);
+                continue;
+            }
             let del_btn = gtk::Button::builder()
                 .icon_name("user-trash-symbolic")
                 .tooltip_text("Delete preset")
@@ -327,7 +339,6 @@ impl ResonateEffectsPage {
                     }
                 ));
             }
-            row.append(&load_btn);
             row.append(&del_btn);
             container.append(&row);
         }
